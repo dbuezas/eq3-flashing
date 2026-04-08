@@ -1,10 +1,25 @@
 # EQ3 CC-RT-BLE Firmware Flashing Guide
 
-## Quick Start (Home Assistant users)
+## Quick Start
 
 **Recommended:** Flash v1.48 with `--noauth` to remove all pairing requirements. This not only eliminates the PIN prompt that causes connection issues with Home Assistant, but also any pairing requiremts whatsoever.
 
-SSH into your Home Assistant host and run:
+If you use it from home assistant, ssh into it and do everything from there
+
+### Before flashing:
+
+1. Disable the device in Home Assistant to avoid interference
+2. Make sure nothing is connected to the device (bluetoothctl, HA, phone)
+3. If the device shows "Ins", press the dial and wait for "AdA" to finish
+4. Pair if needed:
+
+```sh
+     $ bluetoothctl
+     > scan on
+     > pair <addr>  #        (accept prompt or enter 6-digit PIN from display, if you can't pair, see unbrick_flash.py below)
+     > disconnect <addr>
+     > quit
+```
 
 ```bash
 # Clone this repo
@@ -28,33 +43,33 @@ After flashing, power cycle the thermostat (remove/reinsert batteries) and resta
 
 Three methods to flash firmware:
 
-| Method | Script | Requires | Use case |
-|--------|--------|----------|----------|
-| **BLE OTA** | `flash_ble_firmware.py` | bleak, paired or noauth FW | **Recommended** — normal flash (MCU + BLE) |
-| **BLE OTA (Bumble)** | `unbrick_flash.py` | bumble, root, Linux | Can't pair / don't know PIN |
-| **UART (PUART)** | `uart_eeprom.py` | USB-UART adapter, physical access | Bricked device recovery, EEPROM dump |
+| Method               | Script                  | Requires                          | Use case                                   |
+| -------------------- | ----------------------- | --------------------------------- | ------------------------------------------ |
+| **BLE OTA**          | `flash_ble_firmware.py` | bleak, paired or noauth FW        | **Recommended** — normal flash (MCU + BLE) |
+| **BLE OTA (Bumble)** | `unbrick_flash.py`      | bumble, root, Linux               | Can't pair / don't know PIN                |
+| **UART (PUART)**     | `uart_eeprom.py`        | USB-UART adapter, physical access | Bricked device recovery, EEPROM dump       |
 
 ## Device Variants
 
 Two hardware variants exist. They are functionally identical — only the BLE device name and OTA App ID differ:
 
-| Variant | Device name | OTA App ID |
-|---------|-------------|------------|
-| CC-RT-BLE | `CC-RT-BLE` | `0x1000` |
-| CC-RT-M-BLE | `CC-RT-M-BLE` | `0x1001` |
+| Variant     | Device name   | OTA App ID |
+| ----------- | ------------- | ---------- |
+| CC-RT-BLE   | `CC-RT-BLE`   | `0x1000`   |
+| CC-RT-M-BLE | `CC-RT-M-BLE` | `0x1001`   |
 
 The App ID is never validated — either firmware variant works on either hardware. The correct variant is auto-detected from the device name, or can be forced with `--variant`.
 
 ## Firmware Versions
 
-| Version | BLE size (BLE/M) | MCU size | PIN | Notes |
-|---------|------------------|----------|-----|-------|
-| 1.05 | 17118 / — | 33712 | None | Initial release (2015), CC-RT-BLE only |
-| 1.06 | 17118 / — | 33236 | None | Connection fixes, CC-RT-BLE only |
-| 1.10 | 18270 / 18274 | 33088 | None | Week program, extended status (2016) |
-| 1.20 | 18490 / 18512 | 33088 | None | Presets in status response (2018) |
-| 1.46 | 19120 / 19124 | 34024 | 6-digit | Real BLE pairing, passkey on LCD (2020) |
-| 1.48 | 19128 / 19132 | 34024 | 6-digit | Mandatory passkey for all connections (2024) |
+| Version | BLE size (BLE/M) | MCU size | PIN     | Notes                                        |
+| ------- | ---------------- | -------- | ------- | -------------------------------------------- |
+| 1.05    | 17118 / —        | 33712    | None    | Initial release (2015), CC-RT-BLE only       |
+| 1.06    | 17118 / —        | 33236    | None    | Connection fixes, CC-RT-BLE only             |
+| 1.10    | 18270 / 18274    | 33088    | None    | Week program, extended status (2016)         |
+| 1.20    | 18490 / 18512    | 33088    | None    | Presets in status response (2018)            |
+| 1.46    | 19120 / 19124    | 34024    | 6-digit | Real BLE pairing, passkey on LCD (2020)      |
+| 1.48    | 19128 / 19132    | 34024    | 6-digit | Mandatory passkey for all connections (2024) |
 
 ### File naming
 
@@ -70,6 +85,7 @@ firmware/<version>/mcu_CC-RT-M-BLE.enc
 ### noauth firmware
 
 Patched BLE firmware that removes all pairing requirements. Works on all firmware versions. Changes:
+
 - CCCD permission `0x6E` → `0x2E` (clears `AUTH_WRITABLE` bit, keeps all others intact)
 - v1.46+: `encr_required` `0x03` → `0x00` (disables SMP Security Request)
 
@@ -121,11 +137,13 @@ sudo python3 unbrick_flash.py <address> 1.48 --noauth --variant CC-RT-BLE --adap
 ```
 
 **Requirements:**
+
 - Linux only (raw HCI socket)
 - Root access (or `CAP_NET_RAW`)
 - Temporarily takes exclusive control of the BLE adapter
 
 **How it works:**
+
 - Bumble talks directly to the HCI adapter, bypassing the kernel's BLE SMP stack
 - The thermostat sends an SMP Security Request after connection, but Bumble ignores it
 - The thermostat accepts GATT operations anyway — pairing was never truly enforced at the BLE level
@@ -135,6 +153,7 @@ sudo python3 unbrick_flash.py <address> 1.48 --noauth --variant CC-RT-BLE --adap
 ## Method 3: UART EEPROM Access (`uart_eeprom.py`)
 
 Direct EEPROM read/write via the PRG2 programming header on the PCB. **Does not require BLE at all.** Used for:
+
 - Recovering GATT DB bricked devices (corrupted permissions, no OTA service visible)
 - Dumping full EEPROM contents for analysis
 - Patching individual bytes (tested, safe)
@@ -152,6 +171,7 @@ Pin 5: VCC
 ```
 
 Connect a 3.3V USB-UART adapter:
+
 - Adapter **TX** → PRG2 **pin 3**
 - Adapter **RX** → PRG2 **pin 4**
 - Adapter **GND** → PRG2 **pin 2**
@@ -264,6 +284,7 @@ The `patch` command (single-byte writes) is the only tested and safe write opera
 ### Inter-chip UART pinout (for future recovery attempts)
 
 If someone finds a way to enter ROM download mode via the inter-chip UART:
+
 - STM8 pin 2 (NRST/PA1) → GND (hold MCU in reset)
 - STM8 pin 3 (PA2) → UART adapter TX (connects to BCM20736 RXD, pin 12)
 - STM8 pin 4 (PA3) → UART adapter RX (connects to BCM20736 TXD, pin 13)

@@ -305,7 +305,7 @@ Setup on Home Assistant (SSH):
   python3 -m venv /tmp/bleflash
   /tmp/bleflash/bin/pip install bleak
   # copy flash_ble_firmware.py and firmware/ to /tmp/bleflash/
-  /tmp/bleflash/bin/python3 /tmp/bleflash/flash_ble_firmware.py <addr> 1.20 --adapter hci0
+  /tmp/bleflash/bin/python3 /tmp/bleflash/flash_ble_firmware.py <addr> 1.48 --adapter hci0 --noauth
 
 Before flashing:
   1. Disable the device in Home Assistant to avoid interference
