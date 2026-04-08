@@ -2,6 +2,8 @@
 
 # EQ3 CC-RT-BLE Firmware Flashing Guide
 
+The Calor bt app doesn't allow downgrading, and pairing gets in the way in all versions anyway. This repo fixed that.
+
 <img width="200" height="200" alt="image" src="https://github.com/user-attachments/assets/7102716a-915f-47e8-9497-de93796c0927" />
 
 ## Quick Start
