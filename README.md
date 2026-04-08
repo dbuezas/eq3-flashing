@@ -55,7 +55,7 @@ Three methods to flash firmware:
 
 ## Device Variants
 
-Two hardware variants exist. They are functionally identical — only the BLE device name and OTA App ID differ:
+Two hardware variants exist. The mcu firmwares are different (unknown in what) but either works in both. The ble firmwares are functionally identical — only the BLE device name and OTA App ID differ:
 
 | Variant     | Device name   | OTA App ID |
 | ----------- | ------------- | ---------- |
