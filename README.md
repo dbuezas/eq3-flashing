@@ -2,6 +2,8 @@
 
 # EQ3 CC-RT-BLE Firmware Flashing Guide
 
+<img width="200" height="200" alt="image" src="https://github.com/user-attachments/assets/7102716a-915f-47e8-9497-de93796c0927" />
+
 ## Quick Start
 
 **Recommended:** Flash v1.48 with `--noauth` to remove all pairing requirements. This not only eliminates the PIN prompt that causes connection issues with Home Assistant, but also any pairing requiremts whatsoever.
@@ -86,7 +88,9 @@ firmware/<version>/mcu_CC-RT-M-BLE.enc
 
 ### noauth firmware
 
-Patched BLE firmware that removes all pairing requirements. Works on all firmware versions. Changes:
+Patched BLE firmware that removes all pairing requirements. Works on all firmware versions.
+
+Changes:
 
 - CCCD permission `0x6E` → `0x2E` (clears `AUTH_WRITABLE` bit, keeps all others intact)
 - v1.46+: `encr_required` `0x03` → `0x00` (disables SMP Security Request)
