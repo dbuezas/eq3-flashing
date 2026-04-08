@@ -1,0 +1,151 @@
+EQ3 CC-RT-BLE Firmware v1.46 (bleupdate.bin) — Extracted Debug Strings
+======================================================================
+
+The firmware is a WICED Smart SPAR patch (not a flat binary), consisting of
+multiple records loaded to different SRAM addresses. Full decompilation
+requires a tool that understands the SPAR format (e.g., Ghidra with WICED plugin).
+
+The debug strings below reveal the complete firmware architecture:
+
+=== INITIALIZATION ===
+"create()"                                    — App entry point
+"puart_initialization()"                      — UART init (9600 baud to MCU)
+"PassKey read from NVRAM: %x, %x, %x"        — Reads stored passkey
+"First run read from NVRAM: %x rb: %x"       — First-run detection
+"Generated Random Number: %x"                 — RNG for passkey
+"Generated Passkey: %x %x %x"                — Passkey generation
+"Generated Pin: %u"                           — PIN generation
+
+=== BLE ADVERTISING ===
+"Pack ADV Field perform"                      — Build advertising data
+"Pairing Active set to %x in Advertising!"   — pairing_active flag in ADV
+"SN in ADV part 1: %x %x %x %x %x"          — Serial number in ADV
+"SN in ADV part 2: %x %x %x %x %x"          — Serial number in ADV
+"ADV start: %08x%04x"                        — Start advertising
+"ADV stop!!!!"                                — Stop advertising
+"ADV-Mode set to HIGH_UNDIRECTED_DISCOVERABLE"— Fast advertising
+"ADV-Mode set to LOW_UNDIRECTED_DISCOVERABLE" — Slow advertising
+
+=== BLE CONNECTION ===
+"trv_ble_connection_up(void)"                 — Connection established
+"trv_ble_connection_up: %08x%04x %d"         — Connection details
+"trv_ble_connection_down(void)"               — Disconnection handler
+"connection DOWN handler started!"
+"connection_down:handle:%d"
+"Entering deep sleep."                        — Power saving after disconnect
+
+=== PAIRING / SECURITY ===
+"PK transmission!"                            — Passkey sent
+"Content %x"                                  — Passkey content
+"encryption CHANGED handler started!"
+"encryption changed %08x%04x"
+"smp_bond_result handler started!"
+"smp_bond_result %02x"
+"Enc info: LTK"                               — Long-term key exchange
+"master id"                                   — Master ID exchange
+"pairing method, Both Input"                  — Pairing method
+"scr[1].len = %x"                            — Security config
+"scr[1].val = %x"
+"scr[1].data[0] (pairing_active) = %x"       — THE pairing_active flag
+"NVRAM write:%04x"                            — Saving to NVRAM
+
+=== GATT HANDLERS ===
+"bad length:%d handle:%04x"                   — Write validation
+"handle:%02x val:%04x"                        — Read handler
+"write len:%d handle:%02x"                    — Write dispatch
+"don't notify handle:%02x"                    — Notification check
+"not connected handle:%02x"                   — Connection check
+"wait confirmation handle:%02x"               — Indication confirmation
+"indicate len:%d handle=%02x"                 — Send indication
+"notify len:%d handle:%02x"                   — Send notification
+"attrPtr[1] = %x"                            — Attribute value
+"((attrPtr[1]&0xc0) >> 6) = %x"              — Command type extraction
+"Message Type undefined"                      — Unknown command
+"Dummy Notification sent to smartphone to start OTAU" — OTA trigger
+"INDICATION handler started!"
+"on_write_generic_access_reconnection_address handler started!"
+"Notification Handler started"
+
+=== UART PROTOCOL (BLE ↔ MCU) ===
+"Attention! FC or FD in checksum byte 1 detected!" — Byte stuffing
+"Attention! FC or FD in checksum byte 2 detected!" — Byte stuffing
+"Transmitted Payload %x"                      — UART TX
+"CRC-Register %x"                            — CRC-16 state
+"CRC-Check successful"                        — RX frame valid
+"CRC-Check FAILED"                            — RX frame invalid
+"ble_control[0]= %x" ... "ble_control[18]= %x" — 19-byte command buffer
+"Notification:%02x, %d"                       — Notify phone of UART response
+
+=== UART MESSAGE TYPES (from MCU) ===
+"Statusinfo N/ACK with Party detected"        — Status with party mode flag
+"Statusinfo N/ACK detected"                   — Status acknowledgment
+"N/Ack without Statusinfo detected"           — NACK without status
+"Ack with CFG Week Program Day detected"      — Week program config ACK
+"Week program response detected"              — Week program data
+"Transmission of Internals detected"          — MCU internal data (temp?)
+"Transmission of PAIRING detected"            — Pairing info from MCU
+"TimeInfoRequest detected!"                   — MCU requests time
+"FD+CC received from BCM2 , scanmode may start" — MCU triggers BLE scan
+
+=== MCU FIRMWARE UPDATE ===
+"0xA0+0x11 sent to peer"                     — FW update start ACK
+"0xA1+0x33 sent to peer (NACK)"              — FW update NACK
+"0xA1+0x44 sent to peer BL-Finished!"         — Bootloader done
+"written SN to BCM2: %x"                      — Write serial to MCU
+
+=== TEST MODE ===
+"Activate Testmode"                           — Factory test mode
+"Sent 0xFD+0xFF"                              — Test mode UART command
+"Pairing active set to one in Testrunnermode! HIGH Advertisements"
+"Sent 0xFD+0xFE"                              — Another test command
+"Test successful, Addresses in ADV and saved are equal!"
+
+=== GPIO ===
+"An Interrupt occured! Value: %02x"           — GPIO interrupt
+"GPIO: TRUE"                                  — GPIO state
+"GPIO: FALSE"                                 — GPIO state
+
+=== SERIAL NUMBER ===
+"SN1: %x %x %x"                              — Serial number parts
+"SN2: %x %x %x"
+"SN3: %x %x %x %x"
+"Transmittetd SN: %x %x %x"                  — SN sent to MCU
+"g_firstRun set to 0"                         — First-run cleared
+"First Run Set to 1 in NVram wb: %x"          — First-run set
+
+=== OTA FIRMWARE UPGRADE ===
+"ws_verify rcvd:%x calculated:%x"             — CRC verification
+"send_status failed"                          — Notification error
+"send_status %d"                              — Status to phone
+"Command:%d State:%d"                         — OTA state machine
+"Bad Download len:%d"                         — Bad download command
+"state:%d total_len:%d"                       — Download state
+"Bad Verify len:%d"                           — Bad verify command
+"Too much data offsets:%d + %d total:%d len:%d" — Data overflow
+"ws_upgrade_init: DS:%04x SS:%04x"            — Partition info
+"WARNING: Upgrade will fail - active DS is not one of the expected locations."
+"WARNING: Are ConfigDSLocation and DLConfigVSLocation in the .btp set up as in nv_loc_len[]?"
+"Active DS is not DS1 and not DS2. Cannot upgrade."
+"Active: 0x%08X, Upgrade: 0x%08X, UG length: 0x%08X"
+"Could not write new SS!"
+"Could not create upgrade SS"
+
+=== NOTABLE FINDINGS ===
+1. "Transmission of Internals detected" — MCU sends internal data to BLE chip.
+   This is the mystery data that might contain temperature readings.
+   The BLE chip receives it but we don't know if/how it's exposed.
+
+2. "((attrPtr[1]&0xc0) >> 6)" — Command type is extracted from byte 1 bits 7:6.
+   This suggests the command byte format has a type field in the upper 2 bits.
+
+3. "FD+CC received from BCM2, scanmode may start" — The MCU can trigger BLE
+   scanning. 0xFD is the UART frame start, 0xCC is a specific message type.
+
+4. "Activate Testmode" + "Sent 0xFD+0xFF" — Factory test mode uses UART
+   command 0xFF. "0xFD+0xFE" is another test command.
+
+5. "PartyFlag Active" / "Data Read Flag Active" — Unknown flags, possibly
+   related to multi-device coordination or data readout mode.
+
+6. No calibration/AdA command — Motor calibration is entirely MCU-side.
+   The BLE chip just relays commands and has no motor awareness.
