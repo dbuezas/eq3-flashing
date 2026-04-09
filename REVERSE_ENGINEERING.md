@@ -16,8 +16,8 @@
 ## Hardware (PCB)
 - **IC1** (front): STM8L052C6T6 — main MCU
 - **BTM1** (back): Cypress/Broadcom BCM20736 — BLE SoC, QFN with PCB antenna
-- **PRG1**: 4-pin SWIM header for STM8 — pin1=SWIM, pin2=VCC, pin3=unknown, pin4=GND
-- **PRG2**: 5-pin PUART header — pin1=3.3V, pin2=GND, **pin3=PUART RX**, **pin4=PUART TX (115200 baud)**, pin5=VCC. Used for debug trace output and ROM download mode (EEPROM read/write via minidriver). **Note:** PUART is initialized by the SPAR app, not the ROM. If the firmware is corrupted and the SPAR app fails to load, PUART becomes non-functional.
+- **PRG1**: 4-pin SWIM header for STM8 — pin1=SWIM, pin2=VCC, pin3=? (unidentified), pin4=GND
+- **PRG2**: 5-pin PUART header — pin1=3.3V, pin2=GND, **pin3=PUART RX**, **pin4=PUART TX (115200 baud)**, pin5=VCC. Pin 1 and pin 5 are both high (~2.8-3.3V) but whether they are the same net or separate rails is unknown. Used for debug trace output and ROM download mode (EEPROM read/write via minidriver). **Note:** PUART is initialized by the SPAR app, not the ROM. If the firmware is corrupted and the SPAR app fails to load, PUART becomes non-functional.
 - **Inter-chip UART**: STM8 PA2 (pin 3, TX) ↔ BCM20736 pin 12 (RXD), STM8 PA3 (pin 4, RX) ↔ BCM20736 pin 13 (TXD). USART1 remapped to Port A. Application protocol at 9600 baud, ROM download mode at 115200 baud. **Recovery via inter-chip UART was attempted but unsuccessful** — holding STM8 NRST (pin 2) to GND and sending HCI Reset at 115200 did not elicit ROM response. The ROM's download mode interface on these pins remains unconfirmed.
 - **HCI UART**: pins 12 (RXD) and 13 (TXD) on the QFN — same pins as inter-chip application UART (9600 baud). HCI protocol in programming mode, application protocol in normal mode
 - **NTC thermistor**: 10kΩ SMD, connected to STM8 ADC
@@ -136,7 +136,7 @@ All 256 single-byte opcodes tested via BLE→UART relay. Only these produce non-
 | 0x11 | Set comfort/eco temps | comfort,eco (×2=°C) | MsgID 0x02: status ACK |
 | 0x12 | Set window-open config | temp,time | MsgID 0x02: status ACK |
 | 0x13 | Set temperature offset | offset | MsgID 0x02: status ACK |
-| 0x14 | Set window params | params | MsgID 0x02: status ACK |
+| 0x14 | Set window params | ? (unknown payload, different from 0x12 — not tested in detail) | MsgID 0x02: status ACK |
 | 0x20 | Read week program | day (0-6) | MsgID 0x21: day + 7 temp/time pairs |
 | 0x40 | Set operation mode | mode | MsgID 0x02: status ACK |
 | 0x41 | Set target temperature | temp (×2=°C) | MsgID 0x02: status ACK |
@@ -206,7 +206,7 @@ To remove pairing completely from all firmware versions:
 - Patch CCCD permission `0x6E` → `0x2E` on handles 0x0220 and 0x0430 (clears AUTH_WRITABLE bit 6 only)
 - For v1.46+, also patch `encr_required` from `0x03` to `0x00` in `BLE_PROFILE_CFG`
 - Patched firmware in `firmware/<version>/noauth/`
-- Use `--noauth` flag with flash_ble_firmware.py or unbrick_flash.py
+- Use `--noauth` flag with flash_firmware.py or unbrick_flash.py
 
 ## Firmware Versions
 | Firmware | App     | CC-RT-BLE | CC-RT-M-BLE | MCU size | BLE ver | PIN     | Changes |
@@ -252,12 +252,12 @@ All other byte differences are ARM address relocations from the 2-char longer na
 - Requires root, temporarily takes exclusive HCI adapter control
 
 ## Tools
-- `flash_ble_firmware.py` — flash MCU and/or BLE firmware via bleak (requires pairing or --noauth)
-- `unbrick_flash.py` — flash BLE firmware via Bumble, bypasses SMP (no PIN needed, requires root)
+- `flash_firmware.py` — flash MCU and/or BLE firmware via bleak (requires pairing or noauth BLE firmware already on device)
+- `unbrick_flash.py` — flash **BLE firmware only** via Bumble, bypasses SMP (no PIN needed, requires root). MCU flash still needs `flash_firmware.py --mcu-only` which goes through the BLE chip and requires pairing or noauth.
 - `uart_eeprom.py` — BCM20736 EEPROM dump/flash/patch via PUART (PRG2 header, no BLE needed)
 - `firmware/` — all firmware versions from Calor BT APKs, with noauth variants
 - `firmware/minidriver/` — BCM20736 UART minidrivers for EEPROM access
-- See [FLASHING.md](FLASHING.md) for full documentation of all flash methods
+- See [README.md](README.md) for full documentation of all flash methods
 
 ## BLE Chip Boot Sequence (observed via PUART)
 ```
@@ -298,6 +298,16 @@ The BLE firmware contains 163 debug strings output via PUART `ble_trace()`. Key 
 - OTA: `ws_verify`, `send_status`, `Command/State`, `Active DS`
 - Connection: `trv_ble_connection_up/down`, `encryption changed`, `ADV start/stop`
 - Test/debug: `Activate Testmode`, `GPIO: TRUE/FALSE`, `Dummy Notification`
+
+## Open Questions
+
+- **PRG1 pin 3**: Unidentified. Could be NRST routed to header, or a GPIO test point. Not probed.
+- **PRG2 pin 1 vs pin 5**: Both read ~2.8-3.3V. Unknown if same net (battery VCC) or separate rails (e.g. BLE regulator output vs battery).
+- **"Transmission of Internals"**: Handler string exists in BLE firmware but was never observed in any PUART capture (~20 min idle, connected sessions, all 256 commands, button presses). Is it dead code? Does it trigger on a long timer (hourly/daily)? What data does it contain? Would require overnight PUART capture or MCU firmware dump to resolve.
+- **"PartyFlag"**: `"Statusinfo N/ACK with Party detected"` is an alternate code path in the BLE firmware's UART response handler. Vacation mode did NOT trigger it — tested `0x40 0x02` (no date) and `0x40 0x26 0x0A 0x1A 0x18 0x04` (with date), neither set the vacation bit (0x02) in the mode byte nor triggered PartyFlag. Likely a specific MCU response flag bit we haven't seen, or dead code. MCU firmware dump would clarify.
+- **0x14 vs 0x12**: Both are "window" related config commands from the Calor BT app (neither is in the [Heckie75 API doc](https://github.com/Heckie75/eQ-3-radiator-thermostat/blob/master/eq-3-radiator-thermostat-api.md)). 0x12 sets window-open detection config (temp, time). 0x14's payload format is unknown — may carry different window parameters. Not tested in detail.
+- **Test mode trigger**: BLE firmware has "Activate Testmode" → "Sent 0xFD+0xFF" → "Pairing active set to one in Testrunnermode!" code path. Not triggerable via BLE, button, or PUART. Likely factory test jig on MCU GPIO/UART, but exact mechanism unknown.
+- **STM8 ROP bypass**: Voltage glitching on VDD (pin 10) during boot could bypass readout protection and dump the 32KB MCU flash, revealing UART command handlers, AES key, and temperature sensor code. Not attempted yet. The bricked device (dead BLE, working MCU) is an ideal target.
 
 ## References
 - [Heckie75 eQ-3 radiator thermostat API](https://github.com/Heckie75/eQ-3-radiator-thermostat/blob/master/eq-3-radiator-thermostat-api.md)

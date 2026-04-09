@@ -9,14 +9,14 @@ Requirements:
     pip install bleak
 
 Usage:
-    flash_ble_firmware.py                                    Show firmware version table
-    flash_ble_firmware.py scan                               Scan for CC-RT-BLE devices
-    flash_ble_firmware.py <addr> 1.20                        Flash both MCU and BLE
-    flash_ble_firmware.py <addr> 1.20 --ble-only             Flash BLE firmware only
-    flash_ble_firmware.py <addr> 1.20 --mcu-only             Flash MCU firmware only
-    flash_ble_firmware.py <addr> 1.20 --noauth               Flash with no-pairing BLE firmware
-    flash_ble_firmware.py <addr> 1.20 --adapter hci0         Specify BT adapter (Linux)
-    flash_ble_firmware.py <addr> 1.20 --variant CC-RT-M-BLE  Force device variant
+    flash_firmware.py                                    Show firmware version table
+    flash_firmware.py scan                               Scan for CC-RT-BLE devices
+    flash_firmware.py <addr> 1.20                        Flash both MCU and BLE
+    flash_firmware.py <addr> 1.20 --ble-only             Flash BLE firmware only
+    flash_firmware.py <addr> 1.20 --mcu-only             Flash MCU firmware only
+    flash_firmware.py <addr> 1.20 --noauth               Flash with no-pairing BLE firmware
+    flash_firmware.py <addr> 1.20 --adapter hci0         Specify BT adapter (Linux)
+    flash_firmware.py <addr> 1.20 --variant CC-RT-M-BLE  Force device variant
 """
 
 import argparse
@@ -304,8 +304,8 @@ The correct one is auto-detected from the BLE device name.
 Setup on Home Assistant (SSH):
   python3 -m venv /tmp/bleflash
   /tmp/bleflash/bin/pip install bleak
-  # copy flash_ble_firmware.py and firmware/ to /tmp/bleflash/
-  /tmp/bleflash/bin/python3 /tmp/bleflash/flash_ble_firmware.py <addr> 1.48 --adapter hci0 --noauth
+  # copy flash_firmware.py and firmware/ to /tmp/bleflash/
+  /tmp/bleflash/bin/python3 /tmp/bleflash/flash_firmware.py <addr> 1.48 --adapter hci0 --noauth
 
 Before flashing:
   1. Disable the device in Home Assistant to avoid interference

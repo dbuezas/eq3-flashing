@@ -38,7 +38,7 @@ python3 -m venv /tmp/eq3-venv
 
 # Flash MCU + BLE with noauth (auto-detects variant)
 # Replace <address> with your device's MAC (e.g. 00:1A:22:12:B6:05)
-/tmp/eq3-venv/bin/python3 flash_ble_firmware.py <address> 1.48 --noauth
+/tmp/eq3-venv/bin/python3 flash_firmware.py <address> 1.48 --noauth
 ```
 
 If pairing fails or you don't know the PIN, use the Bumble method instead (see Method 2).
@@ -51,7 +51,7 @@ Three methods to flash firmware:
 
 | Method               | Script                  | Requires                          | Use case                                   |
 | -------------------- | ----------------------- | --------------------------------- | ------------------------------------------ |
-| **BLE OTA**          | `flash_ble_firmware.py` | bleak, paired or noauth FW        | **Recommended** — normal flash (MCU + BLE) |
+| **BLE OTA**          | `flash_firmware.py` | bleak, paired or noauth FW        | **Recommended** — normal flash (MCU + BLE) |
 | **BLE OTA (Bumble)** | `unbrick_flash.py`      | bumble, root, Linux               | Can't pair / don't know PIN                |
 | **UART (PUART)**     | `uart_eeprom.py`        | USB-UART adapter, physical access | Bricked device recovery, EEPROM dump       |
 
@@ -99,7 +99,7 @@ Changes:
 
 Use `--noauth` flag with any flash script.
 
-## Method 1: BLE OTA (`flash_ble_firmware.py`)
+## Method 1: BLE OTA (`flash_firmware.py`)
 
 Standard flash via Bluetooth. Requires the device to be paired (or already running noauth firmware).
 
@@ -107,25 +107,25 @@ Standard flash via Bluetooth. Requires the device to be paired (or already runni
 pip install bleak
 
 # Show available firmware versions
-python3 flash_ble_firmware.py
+python3 flash_firmware.py
 
 # Scan for devices
-python3 flash_ble_firmware.py scan
+python3 flash_firmware.py scan
 
 # Flash both MCU and BLE (auto-detects variant)
-python3 flash_ble_firmware.py <address> <version>
+python3 flash_firmware.py <address> <version>
 
 # Flash with noauth BLE firmware
-python3 flash_ble_firmware.py <address> <version> --noauth
+python3 flash_firmware.py <address> <version> --noauth
 
 # Flash BLE only (skip MCU)
-python3 flash_ble_firmware.py <address> <version> --ble-only --noauth
+python3 flash_firmware.py <address> <version> --ble-only --noauth
 
 # Force variant
-python3 flash_ble_firmware.py <address> <version> --variant CC-RT-M-BLE
+python3 flash_firmware.py <address> <version> --variant CC-RT-M-BLE
 
 # Specify adapter (Linux)
-python3 flash_ble_firmware.py <address> <version> --adapter hci0
+python3 flash_firmware.py <address> <version> --adapter hci0
 ```
 
 Flash order: MCU first, then BLE. The script automatically reconnects between steps.
@@ -156,7 +156,7 @@ sudo python3 unbrick_flash.py <address> 1.48 --noauth --variant CC-RT-BLE --adap
 - The thermostat sends an SMP Security Request after connection, but Bumble ignores it
 - The thermostat accepts GATT operations anyway — pairing was never truly enforced at the BLE level
 
-**Note:** This script only flashes BLE firmware. Flash the MCU separately with `flash_ble_firmware.py --mcu-only` if needed (MCU flash doesn't require pairing).
+**Note:** This script only flashes BLE firmware. To also update the MCU, first flash BLE with `--noauth` via Bumble, then use `flash_firmware.py <address> 1.48 --noauth --mcu-only` (MCU flash goes through the BLE chip, so it needs pairing or noauth firmware).
 
 ## Method 3: UART EEPROM Access (`uart_eeprom.py`)
 
