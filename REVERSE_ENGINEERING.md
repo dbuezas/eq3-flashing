@@ -16,7 +16,7 @@
 ## Hardware (PCB)
 - **IC1** (front): STM8L052C6T6 — main MCU
 - **BTM1** (back): Cypress/Broadcom BCM20736 — BLE SoC, QFN with PCB antenna
-- **PRG1**: 4-pin SWIM header for STM8 — pin1=SWIM, pin2=VCC, pin3=? (unidentified), pin4=GND
+- **PRG1**: 4-pin SWIM header for STM8 — pin1=SWIM, pin2=VCC, pin3=NRST, pin4=GND
 - **PRG2**: 5-pin PUART header — pin1=3.3V, pin2=GND, **pin3=PUART RX**, **pin4=PUART TX (115200 baud)**, pin5=VCC. Pin 1 and pin 5 are both high (~2.8-3.3V) but whether they are the same net or separate rails is unknown. Used for debug trace output and ROM download mode (EEPROM read/write via minidriver). **Note:** PUART is initialized by the SPAR app, not the ROM. If the firmware is corrupted and the SPAR app fails to load, PUART becomes non-functional.
 - **Inter-chip UART**: STM8 PA2 (pin 3, TX) ↔ BCM20736 pin 12 (RXD), STM8 PA3 (pin 4, RX) ↔ BCM20736 pin 13 (TXD). USART1 remapped to Port A. Application protocol at 9600 baud, ROM download mode at 115200 baud. **Recovery via inter-chip UART was attempted but unsuccessful** — holding STM8 NRST (pin 2) to GND and sending HCI Reset at 115200 did not elicit ROM response. The ROM's download mode interface on these pins remains unconfirmed.
 - **HCI UART**: pins 12 (RXD) and 13 (TXD) on the QFN — same pins as inter-chip application UART (9600 baud). HCI protocol in programming mode, application protocol in normal mode

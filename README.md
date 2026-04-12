@@ -292,7 +292,7 @@ firmware/1.48/eeprom_CC-RT-BLE_noauth.bin
 firmware/1.48/eeprom_CC-RT-M-BLE_noauth.bin
 ```
 
-These are for analysis/reference. Do NOT flash one device's EEPROM dump onto a different device.
+If you flash one device's EEPROM dump onto a different device, remember to change its mac address after.
 
 ## Unbricking a Device
 
