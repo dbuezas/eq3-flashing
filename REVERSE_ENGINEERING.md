@@ -199,7 +199,7 @@ GATT DB entry headers (packed structs):
 
 **WARNING**: Changing bits 0 or 7 corrupts the GATT DB parser, making subsequent entries (including the OTA service) invisible. This bricks the device for BLE OTA recovery.
 
-**WARNING**: Writing to EEPROM via PUART is risky. If the write corrupts the DS1 firmware header and the SPAR app fails to load, the ROM falls back to its default HCI interface (QFN pins 12/13, NOT PUART). The device becomes **unrecoverable via the PRG2 header**. Single-byte patches (proven safe) are much less risky than bulk firmware writes (experimental, caused a brick).
+**CAUTION**: Writing to EEPROM via PUART carries risk. If the write corrupts the DS1 firmware header and the SPAR app fails to load, the ROM falls back to its default HCI interface (QFN pins 12/13, NOT PUART). The device becomes **unrecoverable via the PRG2 header**. Single-byte patches (`patch`, `patch-mac`) are proven safe. Bulk firmware writes (`flash-fw`) have been used successfully but can brick the device if interrupted — always dump a backup first.
 
 ### noauth Patch
 To remove pairing completely from all firmware versions:
@@ -254,7 +254,7 @@ All other byte differences are ARM address relocations from the 2-char longer na
 ## Tools
 - `flash_firmware.py` — flash MCU and/or BLE firmware via bleak (requires pairing or noauth BLE firmware already on device)
 - `unbrick_flash.py` — flash **BLE firmware only** via Bumble, bypasses SMP (no PIN needed, requires root). MCU flash still needs `flash_firmware.py --mcu-only` which goes through the BLE chip and requires pairing or noauth.
-- `uart_eeprom.py` — BCM20736 EEPROM dump/flash/patch via PUART (PRG2 header, no BLE needed)
+- `uart_eeprom.py` — BCM20736 EEPROM dump/flash/patch/patch-mac via PUART (PRG2 header, no BLE needed)
 - `firmware/` — all firmware versions from Calor BT APKs, with noauth variants
 - `firmware/minidriver/` — BCM20736 UART minidrivers for EEPROM access
 - See [README.md](README.md) for full documentation of all flash methods

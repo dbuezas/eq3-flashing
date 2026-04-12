@@ -53,7 +53,7 @@ Three methods to flash firmware:
 | -------------------- | ----------------------- | --------------------------------- | ------------------------------------------ |
 | **BLE OTA**          | `flash_firmware.py` | bleak, paired or noauth FW        | **Recommended** — normal flash (MCU + BLE) |
 | **BLE OTA (Bumble)** | `unbrick_flash.py`      | bumble, root, Linux               | Can't pair / don't know PIN                |
-| **UART (PUART)**     | `uart_eeprom.py`        | USB-UART adapter, physical access | Bricked device recovery, EEPROM dump       |
+| **UART (PUART)**     | `uart_eeprom.py`        | USB-UART adapter, physical access | Bricked device recovery, EEPROM dump, MAC change |
 
 ## Device Variants
 
@@ -165,6 +165,7 @@ Direct EEPROM read/write via the PRG2 programming header on the PCB. **Does not 
 - Recovering GATT DB bricked devices (corrupted permissions, no OTA service visible)
 - Dumping full EEPROM contents for analysis
 - Patching individual bytes (tested, safe)
+- Changing the BLE MAC address
 
 ### Hardware Setup
 
@@ -218,9 +219,55 @@ python3 uart_eeprom.py read -p /dev/ttyUSB0 --offset 0x3C00 --length 128
 
 # Patch a single byte (e.g., fix corrupted GATT DB permission) — TESTED, SAFE
 python3 uart_eeprom.py patch -p /dev/ttyUSB0 --offset 0x3C2A --value 0x8A
+
+# Change the BLE MAC address — TESTED, SAFE (single-byte writes)
+python3 uart_eeprom.py patch-mac -p /dev/ttyUSB0 --mac 00:1A:22:12:B6:05
+
+# Flash BLE firmware to DS1 — use with care, always dump a backup first
+python3 uart_eeprom.py flash-fw -p /dev/ttyUSB0 -i firmware/1.48/noauth/ble_CC-RT-BLE.bin
+
+# Flash full EEPROM image — use with care, always dump a backup first
+python3 uart_eeprom.py flash -p /dev/ttyUSB0 -i eeprom_backup.bin
 ```
 
-**DO NOT USE `flash-fw` or `flash` commands** — bulk EEPROM writes are untested and can corrupt the firmware header, making the device unrecoverable via PUART. Use `patch` for single-byte fixes, or flash via BLE OTA instead.
+`flash-fw` writes a BLE firmware `.bin` file to the DS1 region only (the firmware area). It preserves device identity (MAC, pairing data, NVRAM). Use this to install or recover BLE firmware without affecting anything else.
+
+`flash` writes a full 64 KB EEPROM image, overwriting **everything** — firmware, MAC address, pairing data, NVRAM. If flashing a dump from a different device, use `patch-mac` afterwards to restore the original MAC address.
+
+**Be careful with both** — bulk EEPROM writes can corrupt the firmware header, making the device unrecoverable via PUART. Always dump a backup first. `flash-fw` has been used successfully to recover devices, but verification may report false failures due to UART timing. Prefer `patch` / `patch-mac` for targeted fixes, or flash via BLE OTA when possible.
+
+#### Example: full EEPROM recovery using the provided dumps
+
+```bash
+# 1. Dump current EEPROM as backup
+python3 uart_eeprom.py dump -p /dev/ttyUSB0 -o my_backup.bin
+
+# 2. Flash the provided noauth v1.48 EEPROM image (use the correct variant)
+python3 uart_eeprom.py flash -p /dev/ttyUSB0 -i firmware/1.48/eeprom_CC-RT-BLE_noauth.bin
+# or for M variant:
+# python3 uart_eeprom.py flash -p /dev/ttyUSB0 -i firmware/1.48/eeprom_CC-RT-M-BLE_noauth.bin
+
+# 3. Restore your device's original MAC address
+python3 uart_eeprom.py patch-mac -p /dev/ttyUSB0 --mac 00:1A:22:XX:XX:XX
+
+# 4. Power cycle, then flash MCU firmware to match via BLE (noauth is already on)
+python3 flash_firmware.py 00:1A:22:XX:XX:XX 1.48 --noauth --mcu-only
+```
+
+#### Example: BLE firmware recovery using flash-fw
+
+If you only need to replace the BLE firmware (e.g., corrupted GATT DB) without touching the device identity (MAC, pairing data, NVRAM):
+
+```bash
+# 1. Dump current EEPROM as backup
+python3 uart_eeprom.py dump -p /dev/ttyUSB0 -o my_backup.bin
+
+# 2. Flash BLE firmware only to DS1
+python3 uart_eeprom.py flash-fw -p /dev/ttyUSB0 -i firmware/1.48/noauth/ble_CC-RT-BLE.bin
+
+# 3. Power cycle, then flash MCU firmware to match via BLE
+python3 flash_firmware.py 00:1A:22:XX:XX:XX 1.48 --noauth --mcu-only
+```
 
 After any operation, **power cycle the device** (remove and re-insert batteries) to resume normal operation.
 
@@ -283,11 +330,13 @@ python3 uart_eeprom.py patch -p /dev/ttyUSB0 --offset 0x3C68 --value 0x8A
 sudo python3 unbrick_flash.py <address> 1.48 --noauth --variant CC-RT-BLE
 ```
 
-### WARNING: DO NOT use `flash-fw` or `flash` commands
+### Caution: `flash-fw` and `flash` commands
 
-Bulk EEPROM writes via PUART are **untested and dangerous**. A partial write failure can corrupt the DS1 firmware header, causing the SPAR app to not load. Without the SPAR app, PUART is never initialized. Recovery via the inter-chip UART (STM8 PA2/PA3 = pins 3/4, holding NRST to GND) was attempted but **did not work** — the ROM did not respond to HCI Reset at 115200 on those pins. The device becomes **permanently bricked**.
+Bulk EEPROM writes via PUART carry risk. A partial write failure can corrupt the DS1 firmware header, causing the SPAR app to not load. Without the SPAR app, PUART is never initialized. Recovery via the inter-chip UART (STM8 PA2/PA3 = pins 3/4, holding NRST to GND) was attempted but **did not work** — the ROM did not respond to HCI Reset at 115200 on those pins. The device becomes **permanently bricked**.
 
-The `patch` command (single-byte writes) is the only tested and safe write operation.
+`flash-fw` has been used successfully to recover devices, but verification may fail even on a successful write (known issue — UART timing sensitivity). Always dump a backup first.
+
+The `patch` and `patch-mac` commands (single-byte writes) are the safest write operations.
 
 ### Inter-chip UART pinout (for future recovery attempts)
 

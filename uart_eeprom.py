@@ -10,9 +10,9 @@ Connect USB-UART adapter: TX→pin3, RX→pin4. Baud: 115200.
 
 WARNING: PUART is initialized by the SPAR application firmware. If the firmware
 is corrupted (e.g. by a failed bulk write), PUART becomes non-functional and the
-device may be permanently bricked. Only the 'patch' command (single-byte writes)
-has been tested and proven safe. The 'flash' and 'flash-fw' commands are
-DANGEROUS and should not be used.
+device may be permanently bricked. The 'patch' and 'patch-mac' commands (single-
+byte writes) are tested and safe. The 'flash' and 'flash-fw' commands do bulk
+writes — use with care and always dump a backup first.
 
 Usage:
   # Dump full EEPROM to file
@@ -21,8 +21,11 @@ Usage:
   # Read a region
   python3 uart_eeprom.py read --port /dev/ttyUSB0 --offset 0x3C00 --length 64
 
-  # Patch specific bytes (SAFE — single-byte writes, proven)
+  # Patch specific bytes (single-byte writes, proven safe)
   python3 uart_eeprom.py patch --port /dev/ttyUSB0 --offset 0x3C2A --value 0x8A
+
+  # Change the BLE MAC address (patches SS1 + SS2, single-byte writes)
+  python3 uart_eeprom.py patch-mac --port /dev/ttyUSB0 --mac 00:1A:22:XX:XX:XX
 
 After running any command, power cycle the device to resume normal operation.
 
@@ -47,6 +50,14 @@ SS2_OFFSET = 0x0100
 VS_OFFSET  = 0x0140
 DS1_OFFSET = 0x0580
 DS2_OFFSET = 0x8000
+
+# BD_ADDR (MAC) location in the Static Section
+# Config-item header: id=0x40 (BD_ADDR), length=0x0006
+# Stored little-endian (LSB first) at offset 0x15 within each SS copy
+BDADDR_HEADER = bytes([0x40, 0x06, 0x00])
+BDADDR_HEADER_OFFSET = 0x12  # relative to SS start
+BDADDR_OFFSET = 0x15          # relative to SS start
+BDADDR_LEN = 6
 
 MINIDRIVER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "firmware", "minidriver")
 
@@ -263,20 +274,23 @@ def cmd_dump(args):
 
 def cmd_flash(args):
     """Flash a full EEPROM image.
-    WARNING: EXPERIMENTAL AND DESTRUCTIVE. This overwrites the entire EEPROM
-    including device identity (MAC address, pairing data, NVRAM).
-    Only use to restore the SAME device from its own backup.
-    A failed write can make the device unrecoverable via PUART."""
+    CAUTION: This overwrites the entire EEPROM including device identity
+    (MAC address, pairing data, NVRAM). A failed write can make the device
+    unrecoverable via PUART. Always dump a backup first."""
     image = open(args.input, 'rb').read()
-    print("WARNING: This overwrites the ENTIRE EEPROM including device identity.")
+    if len(image) != EEPROM_SIZE:
+        print(f"ERROR: image is {len(image)} bytes, expected {EEPROM_SIZE} (64 KB).")
+        if len(image) < EEPROM_SIZE:
+            print("This looks like a firmware .bin, not a full EEPROM dump.")
+            print("Did you mean 'flash-fw' instead of 'flash'?")
+        return 1
+    print("CAUTION: This overwrites the ENTIRE EEPROM including device identity.")
     print("A failed write can make the device unrecoverable via PUART.")
     print("Make sure you have a dump backup first!")
     resp = input("Continue? (yes/no): ")
     if resp.strip().lower() != 'yes':
         print("Aborted.")
         return 0
-    if len(image) != EEPROM_SIZE:
-        print(f"Warning: image is {len(image)} bytes, expected {EEPROM_SIZE}")
 
     hci = HCITransport(args.port)
     try:
@@ -315,23 +329,25 @@ def cmd_flash(args):
 
 def cmd_flash_fw(args):
     """Flash a BLE firmware .bin file to DS1.
-    WARNING: EXPERIMENTAL. A failed write can corrupt the firmware header,
-    making the device unrecoverable via PUART. Always dump first.
+    CAUTION: A failed write can corrupt the firmware header, making the
+    device unrecoverable via PUART. Always dump a backup first.
     The .bin file is written as-is (including any OTA header) since the
     EEPROM DS1 region stores the complete file verbatim."""
     fw_data = open(args.input, 'rb').read()
-    print("WARNING: This is a destructive operation. If the write fails")
-    print("partially, the device may become unrecoverable via PUART.")
-    print("Make sure you have a dump backup first!")
+    max_ds_size = DS2_OFFSET - DS1_OFFSET
+    if len(fw_data) == EEPROM_SIZE:
+        print(f"ERROR: file is {len(fw_data)} bytes — this looks like a full EEPROM dump.")
+        print("Did you mean 'flash' instead of 'flash-fw'?")
+        return 1
+    if len(fw_data) > max_ds_size:
+        print(f"ERROR: firmware too large: {len(fw_data)} > {max_ds_size}")
+        return 1
+    print("CAUTION: If the write fails partially, the device may become")
+    print("unrecoverable via PUART. Make sure you have a dump backup first!")
     resp = input("Continue? (yes/no): ")
     if resp.strip().lower() != 'yes':
         print("Aborted.")
         return 0
-
-    max_ds_size = DS2_OFFSET - DS1_OFFSET
-    if len(fw_data) > max_ds_size:
-        print(f"Firmware too large: {len(fw_data)} > {max_ds_size}")
-        return 1
 
     hci = HCITransport(args.port)
     try:
@@ -406,6 +422,107 @@ def cmd_patch(args):
         hci.close()
 
 
+def parse_mac(s):
+    """Parse 'XX:XX:XX:XX:XX:XX' (or '-' separators) into 6 bytes, big-endian."""
+    s = s.replace('-', ':').strip()
+    parts = s.split(':')
+    if len(parts) != 6:
+        return None
+    try:
+        return bytes(int(p, 16) for p in parts)
+    except ValueError:
+        return None
+
+
+def fmt_mac(mac_le):
+    """Format 6 little-endian bytes as XX:XX:XX:XX:XX:XX."""
+    return ':'.join(f'{b:02X}' for b in mac_le[::-1])
+
+
+def cmd_patch_mac(args):
+    """Change the BLE MAC address (BD_ADDR) in EEPROM.
+
+    Patches the BD_ADDR in both SS1 and SS2 using single-byte writes
+    (the same proven-safe write primitive as the 'patch' command).
+    Only one battery-pull is needed — the minidriver stays loaded."""
+    mac_be = parse_mac(args.mac)
+    if mac_be is None:
+        print(f"Invalid MAC format: {args.mac}")
+        print("Expected: XX:XX:XX:XX:XX:XX (e.g. 00:1A:22:12:B6:05)")
+        return 1
+    mac_le = mac_be[::-1]
+
+    hci = HCITransport(args.port)
+    try:
+        if not enter_download_mode(hci):
+            return 1
+
+        # Verify SS layout matches expected BCM20736 format
+        for label, ss_base in [("SS1", SS1_OFFSET), ("SS2", SS2_OFFSET)]:
+            hdr_off = ss_base + BDADDR_HEADER_OFFSET
+            hdr = read_eeprom(hci, hdr_off, 3)
+            if hdr is None:
+                print(f"Failed to read {label} header at 0x{hdr_off:04X}")
+                return 1
+            if bytes(hdr) != BDADDR_HEADER:
+                # SS2 may be blank on some devices — skip it
+                if label == "SS2" and bytes(hdr) == b'\x00\x00\x00':
+                    print(f"{label}: blank (all zeros) — will skip")
+                    continue
+                print(f"ERROR: {label} BD_ADDR header at 0x{hdr_off:04X} is "
+                      f"{bytes(hdr).hex()}, expected {BDADDR_HEADER.hex()}")
+                print("EEPROM layout does not match — aborting for safety.")
+                return 1
+
+        # Read current MACs
+        copies = []
+        for label, ss_base in [("SS1", SS1_OFFSET), ("SS2", SS2_OFFSET)]:
+            addr_off = ss_base + BDADDR_OFFSET
+            cur = read_eeprom(hci, addr_off, BDADDR_LEN)
+            if cur is None:
+                print(f"Failed to read {label} BD_ADDR")
+                return 1
+            is_blank = all(b == 0 for b in cur)
+            copies.append((label, ss_base, bytes(cur), is_blank))
+            status = "(blank)" if is_blank else ""
+            print(f"Current {label} BD_ADDR: {fmt_mac(cur)} {status}")
+
+        print(f"Target BD_ADDR:      {fmt_mac(mac_le)}")
+
+        # Check if already at target
+        if all(c[2] == mac_le or c[3] for c in copies):
+            non_blank = [c for c in copies if not c[3]]
+            if non_blank and non_blank[0][2] == mac_le:
+                print("Already at target MAC, nothing to do.")
+                return 0
+
+        # Write each copy using single-byte writes
+        for label, ss_base, cur, is_blank in copies:
+            if is_blank:
+                print(f"Skipping {label} (blank)")
+                continue
+            addr_off = ss_base + BDADDR_OFFSET
+            print(f"Patching {label} at 0x{addr_off:04X}...")
+            for i in range(BDADDR_LEN):
+                if cur[i] == mac_le[i]:
+                    continue  # byte already correct
+                if not write_eeprom(hci, addr_off + i, bytes([mac_le[i]])):
+                    print(f"  Write failed at 0x{addr_off + i:04X}!")
+                    return 1
+            # Verify
+            readback = read_eeprom(hci, addr_off, BDADDR_LEN)
+            if bytes(readback) != mac_le:
+                print(f"  VERIFICATION FAILED! Got: {fmt_mac(readback)}")
+                return 1
+            print(f"  {label} verified: {fmt_mac(readback)}")
+
+        print(f"\nBD_ADDR changed to {fmt_mac(mac_le)}")
+        print("Power cycle the device for the change to take effect.")
+        return 0
+    finally:
+        hci.close()
+
+
 def cmd_read(args):
     """Read and display a region of EEPROM."""
     hci = HCITransport(args.port)
@@ -463,6 +580,11 @@ def main():
     p_patch.add_argument('--offset', required=True, help='EEPROM offset (hex)')
     p_patch.add_argument('--value', required=True, help='New value (hex)')
 
+    p_patch_mac = sub.add_parser('patch-mac', help='Change BLE MAC address')
+    p_patch_mac.add_argument(*port_arg['flags'], **port_arg['kwargs'])
+    p_patch_mac.add_argument('--mac', required=True,
+                             help='New MAC address (XX:XX:XX:XX:XX:XX)')
+
     p_read = sub.add_parser('read', help='Read and display EEPROM region')
     p_read.add_argument(*port_arg['flags'], **port_arg['kwargs'])
     p_read.add_argument('--offset', default='0x0000', help='Start offset (hex)')
@@ -478,6 +600,7 @@ def main():
         'flash': cmd_flash,
         'flash-fw': cmd_flash_fw,
         'patch': cmd_patch,
+        'patch-mac': cmd_patch_mac,
         'read': cmd_read,
     }
     sys.exit(commands[args.command](args))
