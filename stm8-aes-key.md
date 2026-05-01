@@ -8,12 +8,14 @@ fully understood and the AES-256 key + IV are recoverable.
 ## What's inside
 
 **AES-256-CBC key (loaded into RAM during OTA):**
+
 ```
 ad 8e 21 f4 15 03 98 dc a5 b1 75 e5 67 92 b1 40
 dc 8a 06 a8 73 d5 06 85 9f 8a ec 7f b0 da 9b e6
 ```
 
 **Initial IV (also in RAM during OTA):**
+
 ```
 32 b8 e7 2f 89 08 5b 2a 6a 8b cd f7 05 76 96 ac
 ```
@@ -33,8 +35,8 @@ into RAM in cleartext to do AES-CBC. So:
 1. Enter OTA mode by sending `FD A0 ...` over UART (which the bootloader
    waits for after reset).
 2. The bootloader then loads the AES key + IV into RAM:
-    - Key at `$0010..$002F`
-    - Initial IV at `$0062..$0071`
+   - Key at `$0010..$002F`
+   - Initial IV at `$0062..$0071`
 3. Halt the CPU via SWIM (e.g.
    `stm8flash -c stlinkv2 -p stm8l052c6 -s ram -b 2048 -r ram.bin`)
    and just read RAM. The key and IV are sitting there in plain text.
@@ -47,30 +49,23 @@ addressable RAM to use it — and that RAM is readable.
 
 The thermostat's STM8L doesn't talk BLE itself — there's a separate BLE
 chip ("the blue chip") on the same board that handles BLE radio and
-exchanges UART frames with the STM8L over the chip's USART1.
+exchanges UART frames with the STM8L over USART1.
 
-The MCU's USART1 is remapped to **PA2 (TX) / PA3 (RX)** at runtime via
-`SYSCFG_RMPCR2` (because the default pins PC5/PC6 are committed to the
-LSE 32.768 kHz crystal, Q1). The BLE chip is wired to PA2/PA3.
+The MCU's USART1 is on **PA2 (TX) / PA3 (RX)**. These nets are
+conveniently brought out to two test pads on the PCB labeled **MP1**
+and **MP2** — natural attach points for a serial adapter. The catch is
+that the BLE chip drives the same UART line whenever it's running, so
+anything you transmit on MP1/MP2 collides with the BLE chip's traffic.
+To get clean access:
 
-The serial lines are conveniently brought out to two test pads on the
-PCB labeled **MP1** and **MP2**. In theory those would be the natural
-attach point for a serial adapter, but in practice the BLE chip drives
-the UART line whenever it's running, so anything you transmit on MP1/MP2
-collides with the BLE chip's traffic. To get clean access:
-
-1. Desolder the BLE module from the PCB. (I did.)
-2. Wire an FTDI 3.3 V serial adapter to the now-empty BLE-side UART pads
-   (or to MP1/MP2 — same nets, just easier soldering).
+1. Desolder the BLE module from the PCB. (I just tore it off with wire cutters)
+2. Wire an FTDI 3.3 V serial adapter to MP1 / MP2.
 3. Common GND between FTDI and the device.
 
 After this, OTA frames addressed to the STM8L go straight from the FTDI
 to the chip. The OTA bootloader's UART protocol is identical to what the
 BLE chip sniffer captured, so the dialog can be replayed and modified at
 will.
-
-(For STM8L052C6 LQFP-48 reference: PC5 = pin 44, PC6 = pin 45;
-PA2/PA3 also identifiable on the pinout if needed.)
 
 ## OTA wire format
 
@@ -84,6 +79,7 @@ There are 224–230 records per firmware (varies by version). All bodies
 are multiples of 16; almost all are 144 bytes.
 
 The CRC is **CRC-16/CMS**:
+
 - polynomial: `0x8005`
 - initial value: `0xFFFF`
 - non-reflected (input and output)
@@ -125,6 +121,7 @@ the reason, it's deterministic and easy to reverse.
 ## What this gets you, what it doesn't
 
 With the AES key + IV + protocol map you can:
+
 - Decrypt every shipped firmware version offline and inspect/diff them.
 - Mint OTA streams that the bootloader accepts (returns `FD A1` commit).
 - Read all of the OTA stream's plaintext including the 16-byte chunk
@@ -136,6 +133,43 @@ device has a separate boot-time integrity check living in
 ROP-protected flash that runs before the app is allowed to start. That
 gate isn't broken by anything in this writeup; it requires either
 glitching or some other hardware-level work on the STM8L to bypass.
+
+## Challenge
+
+If you can figure out how to **boot a forged firmware** on this thing,
+I'd love to hear about it. Concretely: produce an `.enc` whose
+plaintext is not byte-identical to one of the 10 shipped firmwares,
+flash it (the bootloader will commit it — `FD A1` — for almost any
+modification), reset, and have the device actually boot the modified
+code instead of locking up.
+
+What's known about the wall:
+
+- The validator code lives in ROP-protected flash (`$F1E0..$FFFF`) and
+  isn't readable over SWIM (returns `0x71` filler).
+- All 10 shipped firmware variants pass on every device, so the
+  validator's reference value is global, not per-device.
+- The "tag" bytes at the end of every `.enc` look like an MAC/signature
+  but are actually decoration — modifying them changes nothing at boot.
+- The validator's hash function is **not** any standard algorithm:
+  exhaustive sweeps over CRC-16/CRC-32 polynomials, AES-CMAC variants,
+  AES-CBC-MAC, MD5/SHA-1/SHA-256 truncations, Fletcher-16/32, Adler-32,
+  XOR/SUM hashes, and Pearson-with-table-from-flash all produce nothing
+  resembling any value found in the boot ROM dump or the flashed
+  firmware bytes.
+- Boot-validator coverage is byte-precise: roughly 13 specific bytes in
+  block-0 of certain chunks pass freely without bricking; everything
+  else either bricks at boot or aborts mid-OTA.
+- ROP can't be lifted via SWIM without triggering a mass erase that
+  destroys the validator code we want to read.
+
+Open paths I haven't tried (no equipment):
+
+- Voltage / clock glitching at the validator's compare instruction.
+- Power-side-channel on the validator's MAC computation.
+- Decap + electron-microscope of the mask ROM.
+
+Or some clever software-only thing I'm missing.
 
 ## Decrypt example
 
