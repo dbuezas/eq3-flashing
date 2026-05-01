@@ -77,6 +77,19 @@ The App ID is never validated — either firmware variant works on either hardwa
 | 1.46    | 19120 / 19124    | 34024    | 6-digit | Real BLE pairing, passkey on LCD (2020)      |
 | 1.48    | 19128 / 19132    | 34024    | 6-digit | Mandatory passkey for all connections (2024) |
 
+### MCU firmware reverse engineering
+
+The MCU `.enc` files are AES-256-CBC encrypted. Recovery of the key,
+IV, OTA wire format, RAM↔flash byte rotation, and pre-decrypted
+plaintexts of all 10 firmware variants are documented in
+**[stm8-aes-key.md](stm8-aes-key.md)**, with the decrypted streams
+checked into [`decrypted-stm8/`](decrypted-stm8/).
+
+There's also an open challenge: the OTA bootloader will accept forged
+firmware (returns `FD A1` commit) but a separate boot-time integrity
+check refuses to actually run modified code. Cracking that gate is
+unsolved — see the writeup if you want to take a swing at it.
+
 ### File naming
 
 ```

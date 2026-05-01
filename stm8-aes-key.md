@@ -254,4 +254,24 @@ def crc16_cms(data, init=0xFFFF, poly=0x8005):
     return crc
 ```
 
-decrypted v1.05 in the decrypted folder
+## Decrypted firmwares
+
+The 10 shipped firmware variants are pre-decrypted in
+[`decrypted-stm8/`](decrypted-stm8/) as `.fullpt` files (continuous
+AES-CBC plaintext, including the 16-byte block-0 metadata header of
+every chunk — i.e. *with* the "ghost"/header bytes the existing tooling
+discards). Useful for protocol-level inspection, diffing across
+versions, or as a starting point for the challenge above.
+
+Files:
+
+- `v1.05_CC-RT-BLE.fullpt`
+- `v1.06_CC-RT-BLE.fullpt`
+- `v1.10_CC-RT-BLE.fullpt`, `v1.10_CC-RT-M-BLE.fullpt`
+- `v1.20_CC-RT-BLE.fullpt`, `v1.20_CC-RT-M-BLE.fullpt`
+- `v1.46_CC-RT-BLE.fullpt`, `v1.46_CC-RT-M-BLE.fullpt`
+- `v1.48_CC-RT-BLE.fullpt`, `v1.48_CC-RT-M-BLE.fullpt`
+
+To get flash-content-only `.bin` (with the per-4-byte rotation applied
+and block 0 stripped), run the decrypter above on the original `.enc`
+or apply `ram_to_flash()` to the non-block-0 portions of the `.fullpt`.
