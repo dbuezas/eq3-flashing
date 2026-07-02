@@ -44,7 +44,7 @@
 
     <!-- $8000-$91FF UBC resident -->
     <rect x="220" y="478" width="360" height="86" fill="#f6d9d6" stroke="#c55"/>
-    <text x="400" y="506" text-anchor="middle" class="lbl">$8000–$91FF · UBC / boot ROM (not in OTA)</text>
+    <text x="400" y="506" text-anchor="middle" class="lbl">$8000–$91FF · UBC / boot code (not in OTA)</text>
     <text x="400" y="525" text-anchor="middle" class="d">Factory, write-protected (UBC=0x22). Reset vector at $8000.</text>
     <text x="400" y="542" text-anchor="middle" class="d">Runs first; **validates the app → the checksum ALGORITHM is here**.</text>
     <text x="210" y="496" text-anchor="end" class="addr">$9200</text>

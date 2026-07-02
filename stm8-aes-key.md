@@ -50,8 +50,8 @@ into addressable RAM to use it — and that RAM is readable.
 ## UART access (BLE chip removal)
 
 The thermostat's STM8L doesn't talk BLE itself — there's a separate BLE
-chip ("the blue chip") on the same board that handles BLE radio and
-exchanges UART frames with the STM8L over USART1.
+chip on the same board that handles BLE radio and exchanges UART frames
+with the STM8L over USART1.
 
 The MCU's USART1 is on **PA2 (TX) / PA3 (RX)**. These nets are
 conveniently brought out to two test pads on the PCB labeled **MP1**
@@ -194,11 +194,16 @@ What's known about the wall:
 described a per-chunk "block-0" content hash with ~13 free bytes. Both were
 artifacts of the wrong rotation/sequential reconstruction — not correct.)
 
-Open paths I haven't tried (no equipment):
+Attack surface / open paths:
 
-- Voltage / clock glitching at the validator's compare instruction.
-- Power-side-channel on the validator's MAC computation.
-- Decap + electron-microscope of the mask ROM.
+- **Voltage / clock glitching** at the validator's compare (or at the ROP
+  check to lift read protection). I've tried this without success so far —
+  it's still the most promising avenue, just not landed yet.
+- **Power / EM side-channel** on the validator's checksum computation, to
+  recover the algorithm or the reference.
+- Note the resident code lives in **flash, not mask ROM**, so decap +
+  optical/EM imaging won't read it out (flash stores charge, not physical
+  structure) — this isn't a decap-the-ROM situation.
 
 Or some clever software-only thing I'm missing.
 
