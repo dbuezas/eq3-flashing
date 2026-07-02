@@ -20,10 +20,12 @@ dc 8a 06 a8 73 d5 06 85 9f 8a ec 7f b0 da 9b e6
 32 b8 e7 2f 89 08 5b 2a 6a 8b cd f7 05 76 96 ac
 ```
 
-The whole `.enc` OTA stream is **one continuous AES-CBC chain** rooted at
-this IV. Decrypting under (KEY, INITIAL_IV) yields the full plaintext;
-no per-chunk IV is needed in the wire format despite what the wire layout
-suggests.
+Each `.enc` record's body starts with its own **16-byte AES-CBC IV**;
+decrypt `body[16:]` under it and concatenate to get the plaintext (see the
+de-framer below). You *can* also decrypt the whole `.enc` as **one
+continuous chain** rooted at `INITIAL_IV` — it yields the identical payload
+bytes — but that also decrypts the per-record IV regions and leaves them in
+as noise, so for de-framing use the per-record payloads.
 
 ## How I got the key
 
@@ -224,17 +226,25 @@ INITIAL_IV = bytes.fromhex('32b8e72f89085b2a6a8bcdf7057696ac')
 
 
 def transport_stream(enc_path):
-    """Decrypt .enc to the de-interleaved transport stream (one CBC chain)."""
+    """Decrypt each record under its own IV (= the first 16 bytes of the body) and
+    concatenate the payloads -> the clean scatter stream.
+
+    NB: decrypting the whole .enc as one CBC chain under INITIAL_IV yields the same
+    *payload* bytes, but it also decrypts the 16-byte IV regions and leaves them in
+    as noise -- which spawns ~24 spurious `32 00 00` descriptor hits and corrupts the
+    de-frame. So de-frame the per-record payloads, not the whole-chain output.
+    """
     raw = binascii.unhexlify(''.join(enc_path.read_text().split()))
-    bodies = []
+    out = bytearray()
     i = 0
     while i + 2 <= len(raw):
         L = (raw[i] << 8) | raw[i + 1]
         if i + 2 + L > len(raw):
             break
-        bodies.append(raw[i + 2:i + 2 + L][:-2])   # drop trailing 2-byte CRC
+        body = raw[i + 2:i + 2 + L]                 # 16-byte IV | ciphertext | 2-byte CRC
+        out += AES.new(KEY, AES.MODE_CBC, body[0:16]).decrypt(body[16:-2])
         i += 2 + L
-    return AES.new(KEY, AES.MODE_CBC, INITIAL_IV).decrypt(b''.join(bodies))
+    return bytes(out)
 
 
 def deframe(stream):
