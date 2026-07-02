@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="620" font-family="ui-sans-serif,Segoe UI,Helvetica,Arial,sans-serif">
+  <style>
+    .t{font-size:20px;font-weight:700;fill:#111}
+    .s{font-size:13px;fill:#444}
+    .addr{font-size:13px;font-weight:600;fill:#111;font-family:ui-monospace,Menlo,Consolas,monospace}
+    .lbl{font-size:14px;font-weight:600;fill:#111}
+    .d{font-size:12px;fill:#333}
+    .note{font-size:12px;fill:#444}
+    .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+  </style>
+  <rect x="0" y="0" width="900" height="620" fill="#ffffff"/>
+  <text x="30" y="34" class="t">EQ-3 CC-RT-BLE · STM8L052C6 — 32 KB flash: OTA-delivered vs resident</text>
+  <text x="30" y="54" class="s">The OTA is a scatter-load. Descriptors place 124-byte payloads at dst ($9200→$ff80). The boot validator + its algorithm live in flash the OTA never delivers.</text>
+
+  <!-- memory bar: high address at top -->
+  <!-- UBC gap band top ($ff80..$ffff last page) -->
+  <g>
+    <!-- $FF80-$FFFF delivered last page (STAMP) -->
+    <rect x="220" y="80" width="360" height="46" fill="#dff0d8" stroke="#4a7"/>
+    <text x="400" y="101" text-anchor="middle" class="lbl">$FF80–$FFFF · delivered (last page)</text>
+    <text x="400" y="118" text-anchor="middle" class="d">holds the 2-byte integrity STAMP (reference) near $FFFE</text>
+    <text x="210" y="98" text-anchor="end" class="addr">$FFFF</text>
+
+    <!-- $FA00-$FF7F resident gap -->
+    <rect x="220" y="130" width="360" height="70" fill="#f6d9d6" stroke="#c55"/>
+    <text x="400" y="160" text-anchor="middle" class="lbl">$FA00–$FF7F · RESIDENT (not in OTA)</text>
+    <text x="400" y="178" text-anchor="middle" class="d">12-page seek-gap ($f980 → $ff80, +$600). Likely resident boot/validator code.</text>
+    <text x="210" y="148" text-anchor="end" class="addr">$FF80</text>
+
+    <!-- $9200-$F9FF app + boot-low, delivered -->
+    <rect x="220" y="204" width="360" height="270" fill="#dff0d8" stroke="#4a7"/>
+    <text x="400" y="230" text-anchor="middle" class="lbl">$9200–$F9FF · OTA-delivered (scatter)</text>
+    <text x="400" y="249" text-anchor="middle" class="d">App + low-boot code. ~99% reconstructed, self-consistent.</text>
+    <text x="400" y="266" text-anchor="middle" class="d">185 descriptors · 124-byte payload at dst+4 · 4-byte page head</text>
+    <line x1="240" y1="300" x2="560" y2="300" stroke="#4a7" stroke-dasharray="3 3"/>
+    <text x="400" y="318" text-anchor="middle" class="note">readable routines here, e.g.:</text>
+    <text x="400" y="336" text-anchor="middle" class="d mono">$eb90/$f69c flash-unlock (PUKR/DUKR)</text>
+    <text x="400" y="352" text-anchor="middle" class="d mono">$e530 IAPSR poll · $f967 IWDG key</text>
+    <text x="400" y="368" text-anchor="middle" class="d mono">USART1/OTA-receive codec ($5230/$5231)</text>
+    <line x1="240" y1="392" x2="560" y2="392" stroke="#4a7" stroke-dasharray="3 3"/>
+    <text x="400" y="410" text-anchor="middle" class="note">$f680 group-gap: +384 (covers $f700/$f780</text>
+    <text x="400" y="426" text-anchor="middle" class="note">via extended payload — still delivered)</text>
+    <text x="210" y="222" text-anchor="end" class="addr">$FA00</text>
+
+    <!-- $8000-$91FF UBC resident -->
+    <rect x="220" y="478" width="360" height="86" fill="#f6d9d6" stroke="#c55"/>
+    <text x="400" y="506" text-anchor="middle" class="lbl">$8000–$91FF · UBC / boot ROM (not in OTA)</text>
+    <text x="400" y="525" text-anchor="middle" class="d">Factory, write-protected (UBC=0x22). Reset vector at $8000.</text>
+    <text x="400" y="542" text-anchor="middle" class="d">Runs first; **validates the app → the checksum ALGORITHM is here**.</text>
+    <text x="210" y="496" text-anchor="end" class="addr">$9200</text>
+    <text x="210" y="560" text-anchor="end" class="addr">$8000</text>
+  </g>
+
+  <!-- per-build watermark ticks embedded in the framing (~26x, every ~0x900) -->
+  <g fill="#e0a000">
+    <rect x="222" y="214" width="10" height="4"/>
+    <rect x="222" y="244" width="10" height="4"/>
+    <rect x="222" y="278" width="10" height="4"/>
+    <rect x="222" y="312" width="10" height="4"/>
+    <rect x="222" y="346" width="10" height="4"/>
+    <rect x="222" y="388" width="10" height="4"/>
+    <rect x="222" y="424" width="10" height="4"/>
+    <rect x="222" y="462" width="10" height="4"/>
+    <rect x="222" y="112" width="10" height="4"/>
+    <text x="238" y="470" font-size="10" fill="#a06000" transform="rotate(-90 238 470)">◄ per-build watermark ×26</text>
+  </g>
+
+  <!-- right-side call-outs -->
+  <g>
+    <rect x="610" y="80" width="270" height="46" fill="#fffbe6" stroke="#e0b400"/>
+    <text x="622" y="100" class="lbl">★ STAMP = integrity reference</text>
+    <text x="622" y="117" class="note">2 bytes, per-version, edit → UPD (confirmed)</text>
+
+    <rect x="610" y="130" width="270" height="70" fill="#fff" stroke="#c55"/>
+    <text x="622" y="150" class="d">The seek means these bytes are never</text>
+    <text x="622" y="166" class="d">written by OTA → resident. If the validator</text>
+    <text x="622" y="182" class="d">loop lives here, it can't be read from OTA.</text>
+
+    <rect x="610" y="204" width="270" height="158" fill="#fff" stroke="#4a7"/>
+    <text x="622" y="224" class="lbl">Scatter frame (136 B):</text>
+    <text x="622" y="243" class="d mono">32 00 00 HI LO B1 B2   (7B header)</text>
+    <text x="622" y="260" class="d mono">&lt;124-byte payload&gt;</text>
+    <text x="622" y="277" class="d mono">33 00 00 HI LO         (5B trailer)</text>
+    <text x="622" y="298" class="note">B2 = page-index countdown (not a checksum)</text>
+    <text x="622" y="314" class="note">payload placed at dst+4; head = HI LO 00 B2</text>
+    <text x="622" y="336" class="lbl" fill="#a06000">Per-build WATERMARK:</text>
+    <text x="622" y="352" class="note">same fingerprint value ×26 in the framing,</text>
+    <text x="622" y="368" class="note" transform="translate(0,-2)">every ~0x900 — stripped on de-frame, never run</text>
+
+    <rect x="610" y="478" width="270" height="86" fill="#fff" stroke="#999"/>
+    <text x="622" y="498" class="lbl">Transport-tail (NOT flashed):</text>
+    <text x="622" y="517" class="d mono">"KEQ" image descriptor + 0x9CB0 tag</text>
+    <text x="622" y="534" class="d mono">34 30 &lt;per-build fingerprint&gt;</text>
+    <text x="622" y="551" class="note">edit → boots (cosmetic, not validated)</text>
+  </g>
+
+  <!-- legend -->
+  <g>
+    <rect x="30" y="588" width="16" height="14" fill="#dff0d8" stroke="#4a7"/>
+    <text x="52" y="600" class="d">delivered by OTA (readable)</text>
+    <rect x="250" y="588" width="16" height="14" fill="#f6d9d6" stroke="#c55"/>
+    <text x="272" y="600" class="d">resident / not in OTA (unreadable)</text>
+    <rect x="520" y="588" width="16" height="14" fill="#fffbe6" stroke="#e0b400"/>
+    <text x="542" y="600" class="d">integrity reference (the stamp)</text>
+    <rect x="722" y="590" width="10" height="10" fill="#e0a000"/>
+    <text x="738" y="600" class="d">per-build watermark (framing)</text>
+  </g>
+</svg>

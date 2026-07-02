@@ -41,9 +41,9 @@ into RAM in cleartext to do AES-CBC. So:
    `stm8flash -c stlinkv2 -p stm8l052c6 -s ram -b 2048 -r ram.bin`)
    and just read RAM. The key and IV are sitting there in plain text.
 
-The bootloader code itself lives in ROP-protected flash (`$F1E0..$FFFF`)
-so you can't read the binary directly, but it has to load the key into
-addressable RAM to use it — and that RAM is readable.
+The bootloader code lives in SWIM-blocked flash (reads return `0x71`
+filler) so you can't read the binary directly, but it has to load the key
+into addressable RAM to use it — and that RAM is readable.
 
 ## UART access (BLE chip removal)
 
@@ -91,48 +91,65 @@ individual OTA chunks and on the higher-level UART frames the bootloader
 exchanges (`FD <payload> <crc>`); `0xFD` is a sync byte excluded from
 CRC input.
 
-## RAM↔flash word rotation
+## Flash layout: it's a scatter-load, not a linear image
 
-This one tripped me up for a while. The AES output bytes are NOT written
-verbatim to flash — they're permuted within each 4-byte word.
+This one tripped me up for a long time, and I originally got it wrong (an
+earlier version of this writeup claimed a "4-byte word rotation" — that was
+a mistake; there is **no** rotation, and applying one scrambles real code).
 
-Specifically, after AES-CBC decryption you get a stream of "RAM order"
-bytes. Each 4-byte aligned word `[r0, r1, r2, r3]` becomes
-`[r3, r0, r1, r2]` when written to flash. Equivalently:
+The decrypted stream is **not** a flat image you concatenate at `$8000` —
+it's a **relocatable scatter-load**. At a fixed 136-byte period you find
+descriptor records:
 
 ```
-flash[k*4 + 0] = ram[k*4 + 3]
-flash[k*4 + 1] = ram[k*4 + 0]
-flash[k*4 + 2] = ram[k*4 + 1]
-flash[k*4 + 3] = ram[k*4 + 2]
+32 00 00 <HI> <LO> <B1> <B2>   (7-byte header)
+<124-byte payload>
+33 00 00 <HI> <LO>             (5-byte trailer)
 ```
 
-So if you decrypt an `.enc` and the resulting bytes look like garbage,
-apply this rotation per 4-byte word and they snap into a recognisable
-STM8 binary (vector table at `$8000-$807F`, app code from `$8080`).
+`HI:LO` is a page-aligned destination address. The targets ramp
+`$9200 → $ff80` in steps of `$80` (one 128-byte page), with a few `+$180`
+(384) and one `+$600` (1536) "group-gap" jumps. Each 124-byte payload is
+placed at its target after a 4-byte page head `HI LO 00 B2` (so the payload
+sits at `dst+4`). `B2` is a per-page index countdown (`77 6f 67 … 07`,
+resetting every 15-page block), **not** a checksum.
 
-If you want to forge a `.bin → .enc`, apply the inverse rotation
-(`flash → ram`: `[a, b, c, d]` becomes `[b, c, d, a]`) before encrypting.
+So the runtime image lives at **`$9200..$ff80`**. `$8000..$9200` is the
+**UBC** (User Boot Code; write-protected, UBC option byte `0x22`) and is
+**not carried in the OTA** — that's where the reset vector and the boot
+validator live. A block of high pages (`$fa80..$ff00`, ~1.3 KB) is also
+never sent: the `$f980` descriptor's frame holds only ~131 bytes yet its
+dst jumps `+1536` to `$ff80`, so the OTA *seeks past* those pages and they
+stay resident.
 
-The rotation is presumably a hardware quirk of how the bootloader
-streams AES output bytes into the flash write peripheral. Whatever
-the reason, it's deterministic and easy to reverse.
+![Flash memory map: OTA-delivered regions (green) vs. resident regions the OTA never carries (red), the 136-byte scatter frame, the per-build watermark, and the 2-byte integrity stamp at $FFFE. The validator's algorithm lives in the red regions.](flash_structure.svg)
+
+De-framed like this, the code reads as clean STM8 — e.g. the flash-unlock
+`35 56 50 52 35 ae 50 52` and the watchdog-key routine `mov $50e0,#$cc`.
+(Under the old "rotate every word" model those exact bytes decode to
+garbage, which is how I finally realised the rotation model was wrong.)
 
 ## What this gets you, what it doesn't
 
 With the AES key + IV + protocol map you can:
 
-- Decrypt every shipped firmware version offline and inspect/diff them.
+- Decrypt every shipped firmware version offline, de-frame the scatter-load
+  (see above), and inspect/diff the real runtime image.
 - Mint OTA streams that the bootloader accepts (returns `FD A1` commit).
-- Read all of the OTA stream's plaintext including the 16-byte chunk
-  headers, which the existing tooling treats as discardable IVs but
-  are actually structured metadata records.
+- Read the OTA stream's full plaintext. (The 16-byte chunk headers are just
+  the per-record CBC IV bytes — an earlier note that they were "structured
+  metadata" / a per-chunk content hash was a dead end; they carry no
+  integrity information.)
 
-What you can't easily do (yet) is **boot a modified firmware**. The
-device has a separate boot-time integrity check living in
-ROP-protected flash that runs before the app is allowed to start. That
-gate isn't broken by anything in this writeup; it requires either
-glitching or some other hardware-level work on the STM8L to bypass.
+What you can't easily do (yet) is **boot a modified firmware**. A
+boot-time integrity check validates the flashed image before the app
+runs and shows `UPD` (refusing to boot) on any modification. The check's
+*reference* is a **2-byte per-version value at the very top of flash
+(`$FFFE`)**, carried in the OTA — flip a byte of it and the device shows
+`UPD`, confirming it's checked. But the *algorithm* that reads it lives in
+the resident code the OTA never delivers (the UBC `$8000..$9200`, and/or
+the `$fa80..$ff00` seek-gap), so you can't read it or recompute a valid
+value without a hardware dump of that region.
 
 ## Challenge
 
@@ -145,23 +162,35 @@ code instead of locking up.
 
 What's known about the wall:
 
-- The validator code lives in ROP-protected flash (`$F1E0..$FFFF`) and
-  isn't readable over SWIM (returns `0x71` filler).
-- All 10 shipped firmware variants pass on every device, so the
-  validator's reference value is global, not per-device.
-- The "tag" bytes at the end of every `.enc` look like an MAC/signature
-  but are actually decoration — modifying them changes nothing at boot.
-- The validator's hash function is **not** any standard algorithm:
-  exhaustive sweeps over CRC-16/CRC-32 polynomials, AES-CMAC variants,
-  AES-CBC-MAC, MD5/SHA-1/SHA-256 truncations, Fletcher-16/32, Adler-32,
-  XOR/SUM hashes, and Pearson-with-table-from-flash all produce nothing
-  resembling any value found in the boot ROM dump or the flashed
-  firmware bytes.
-- Boot-validator coverage is byte-precise: roughly 13 specific bytes in
-  block-0 of certain chunks pass freely without bricking; everything
-  else either bricks at boot or aborts mid-OTA.
-- ROP can't be lifted via SWIM without triggering a mass erase that
-  destroys the validator code we want to read.
+- The validator *algorithm* lives in resident flash the OTA never carries:
+  the write-protected UBC (`$8000..$9200`) and/or the `$fa80..$ff00`
+  seek-gap. SWIM reads of flash are blocked (return `0x71` filler).
+- The reference it compares against is a 2-byte value per firmware version
+  at `$FFFE`, embedded in the OTA content — same across devices (per-version,
+  not per-device) and identical between the CC-RT-BLE and CC-RT-M-BLE
+  variants (whose runtime code is byte-identical).
+- The check covers the code (edit any code byte → `UPD`) but not the tail:
+  the FF padding, and the `34 30`-prefixed block — which isn't even written
+  to flash, it's transport-tail framing — both take edits and still boot.
+  That `34 30` block is a **per-build watermark** (it differs between the
+  BLE/M variants whose code is byte-identical) — decoration, not the
+  reference. The reference is the 2-byte stamp at `$FFFE` (above).
+- The reference is **not** any standard checksum. On the *correctly
+  de-framed* content, exhaustive sweeps come up empty: CRC-8/16/24/32 (all
+  params, via `delsum`), modsum, Fletcher, polyhash; additive-SUM and XOR
+  (ruled out by compensation flashes); AES-CBC-MAC / CMAC with the known OTA
+  key; and Pearson hashes built from the AES S-box (and its inverse). So it's
+  a custom or *keyed* 16-bit function whose secret (algorithm and/or a
+  dedicated key) sits in the resident region.
+- There are only 6 `(content → reference)` pairs (the shipped versions) and
+  the on-device oracle is 1 bit (boot vs `UPD`) — far too little to reverse
+  a custom/non-linear 16-bit function blind.
+- ROP can't be lifted via SWIM without a mass erase that destroys the
+  resident code we'd want to read.
+
+(An earlier version of this section put the validator in `$F1E0..$FFFF` and
+described a per-chunk "block-0" content hash with ~13 free bytes. Both were
+artifacts of the wrong rotation/sequential reconstruction — not correct.)
 
 Open paths I haven't tried (no equipment):
 
@@ -177,7 +206,12 @@ Minimal Python decrypter (uses `pycryptodome`):
 
 ```python
 #!/usr/bin/env python3
-"""Decrypt an EQ-3 CC-RT-BLE .enc OTA file to flash-order bytes."""
+"""De-frame an EQ-3 CC-RT-BLE .enc OTA into its true runtime flash image.
+
+Scatter-load, NO word rotation. Decrypt the whole .enc as one AES-CBC chain,
+then place each descriptor's 124-byte payload at its page-aligned target.
+Runtime image spans $9200..$ff80 ($8000..$9200 is the resident UBC).
+"""
 import binascii, sys
 from pathlib import Path
 from Crypto.Cipher import AES
@@ -189,57 +223,61 @@ KEY = bytes.fromhex(
 INITIAL_IV = bytes.fromhex('32b8e72f89085b2a6a8bcdf7057696ac')
 
 
-def parse_chunks(b):
-    """Yield each chunk's body (everything except length prefix and crc)."""
-    i = 0
-    while i + 2 <= len(b):
-        L = (b[i] << 8) | b[i + 1]
-        if i + 2 + L > len(b):
-            break
-        yield b[i + 2: i + 2 + L][:-2]   # drop trailing 2-byte crc
-        i += 2 + L
-
-
-def ram_to_flash(r):
-    """Per-4-byte-word rotation: ram[a,b,c,d] -> flash[d,a,b,c]."""
-    out = bytearray(len(r))
-    for k in range(len(r) // 4):
-        out[k*4 + 0] = r[k*4 + 3]
-        out[k*4 + 1] = r[k*4 + 0]
-        out[k*4 + 2] = r[k*4 + 1]
-        out[k*4 + 3] = r[k*4 + 2]
-    return bytes(out)
-
-
-def decrypt(enc_path):
+def transport_stream(enc_path):
+    """Decrypt .enc to the de-interleaved transport stream (one CBC chain)."""
     raw = binascii.unhexlify(''.join(enc_path.read_text().split()))
-    # Concatenate all chunk bodies into one continuous ciphertext stream.
-    full_ct = b''.join(parse_chunks(raw))
-    # One CBC chain rooted at INITIAL_IV.
-    full_pt = AES.new(KEY, AES.MODE_CBC, INITIAL_IV).decrypt(full_ct)
-    # Apply RAM->flash rotation. Per-chunk block 0 (first 16 bytes of each
-    # 144-byte chunk) is metadata and not part of the flashed firmware;
-    # blocks 1-8 of each chunk are the firmware payload.
-    flash = bytearray()
-    n = len(full_pt) // 144
-    last_size = len(full_pt) - n * 144
-    for k in range(n):
-        chunk_pt = full_pt[k*144 : (k+1)*144]
-        flash.extend(ram_to_flash(chunk_pt[16:]))   # skip block 0
-    if last_size:
-        chunk_pt = full_pt[n*144:]
-        flash.extend(ram_to_flash(chunk_pt[16:]))
-    # Reset vector at flash $8000..$8003 isn't carried in the OTA stream;
-    # the bootloader keeps it itself. Prepend the v1.05 value as a
-    # convenience so flash[0] corresponds to flash address $8000.
-    return bytes.fromhex('8200f927') + bytes(flash)
+    bodies = []
+    i = 0
+    while i + 2 <= len(raw):
+        L = (raw[i] << 8) | raw[i + 1]
+        if i + 2 + L > len(raw):
+            break
+        bodies.append(raw[i + 2:i + 2 + L][:-2])   # drop trailing 2-byte CRC
+        i += 2 + L
+    return AES.new(KEY, AES.MODE_CBC, INITIAL_IV).decrypt(b''.join(bodies))
+
+
+def deframe(stream):
+    """Place each scatter record's payload at its page-aligned dst."""
+    def is_hdr(k):
+        return (k + 6 < len(stream) and stream[k] == 0x32 and stream[k+1] == 0
+                and stream[k+2] == 0
+                and 0x9200 <= ((stream[k+3] << 8) | stream[k+4]) <= 0xff80
+                and (((stream[k+3] << 8) | stream[k+4]) & 0x7f) == 0)
+    flash = bytearray(b'\xff' * 0x10000)
+    i = 0
+    while i < len(stream) - 6:
+        if is_hdr(i):
+            dst = (stream[i+3] << 8) | stream[i+4]
+            # page head = HI LO 00 B2, then the payload at dst+4
+            flash[dst:dst+4] = bytes([stream[i+3], stream[i+4], 0, stream[i+6]])
+            j = i + 7                                  # framed payload -> matching trailer
+            while j < len(stream) - 5 and not (
+                    stream[j] == 0x33 and stream[j+1] == 0 and stream[j+2] == 0
+                    and ((stream[j+3] << 8) | stream[j+4]) == dst):
+                j += 1
+            for k, b in enumerate(stream[i+7:j]):
+                if dst + 4 + k < 0x10000:
+                    flash[dst+4+k] = b
+            k2 = j + 5                                 # group-gap continuation pages
+            while k2 < len(stream) - 6 and not is_hdr(k2):
+                k2 += 1
+            base = dst + 4 + (j - (i + 7))
+            for k, b in enumerate(stream[j+5:k2]):
+                if base + k < 0x10000:
+                    flash[base+k] = b
+            i = k2
+            continue
+        i += 1
+    return flash
 
 
 if __name__ == '__main__':
     enc = Path(sys.argv[1])
+    flash = deframe(transport_stream(enc))
     out = Path(sys.argv[2]) if len(sys.argv) > 2 else enc.with_suffix('.bin')
-    out.write_bytes(decrypt(enc))
-    print(f'wrote {out} ({out.stat().st_size} bytes)')
+    out.write_bytes(bytes(flash[0x8000:0x10000]))   # $8000-based; $9200..$ff80 meaningful
+    print(f'wrote {out}')
 ```
 
 CRC-16/CMS for crafting your own wire chunks:
@@ -257,11 +295,11 @@ def crc16_cms(data, init=0xFFFF, poly=0x8005):
 ## Decrypted firmwares
 
 The 10 shipped firmware variants are pre-decrypted in
-[`decrypted-stm8/`](decrypted-stm8/) as `.fullpt` files (continuous
-AES-CBC plaintext, including the 16-byte block-0 metadata header of
-every chunk — i.e. *with* the "ghost"/header bytes the existing tooling
-discards). Useful for protocol-level inspection, diffing across
-versions, or as a starting point for the challenge above.
+[`decrypted-stm8/`](decrypted-stm8/) as `.fullpt` files — the raw
+continuous AES-CBC plaintext, i.e. the **transport stream before
+de-framing** (it still contains the `32 00 00 …` / `33 00 00 …` scatter
+descriptors). Useful for protocol-level inspection; de-frame them (see the
+code above) to get the `$9200..$ff80` runtime image.
 
 Files:
 
@@ -272,6 +310,7 @@ Files:
 - `v1.46_CC-RT-BLE.fullpt`, `v1.46_CC-RT-M-BLE.fullpt`
 - `v1.48_CC-RT-BLE.fullpt`, `v1.48_CC-RT-M-BLE.fullpt`
 
-To get flash-content-only `.bin` (with the per-4-byte rotation applied
-and block 0 stripped), run the decrypter above on the original `.enc`
-or apply `ram_to_flash()` to the non-block-0 portions of the `.fullpt`.
+To get the runtime `.bin`, run the de-framer above on the original `.enc`
+(or on a `.fullpt` — feed it to `deframe()` directly, skipping the decrypt
+step). There is no rotation and nothing to "strip" — the descriptors are
+consumed by the de-framing, and the payloads land at their targets.
