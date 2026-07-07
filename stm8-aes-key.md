@@ -22,29 +22,34 @@ dc 8a 06 a8 73 d5 06 85 9f 8a ec 7f b0 da 9b e6
 
 The whole `.enc` is **one continuous AES-256-CBC chain** rooted at
 `INITIAL_IV`, chunked into length-prefixed records. Each record's first 16
-bytes *look* like a per-record IV, and you can decrypt each record on its
-own with `body[0:16]` as the IV to recover the payload — but that's a
-decoding shortcut, not the real structure, and it **throws information
-away**. Decrypt the continuous chain instead and those 16-byte blocks are
-**not noise**: each is a per-record **frame** starting with the constant
-magic `98 fe 87 39`, followed by streaming-writer control bytes (a running
-`+8` carry counter and scatter framing). The bootloader decrypts the
-continuous chain and checks that `98 fe 87 39` magic on every record.
+bytes *look* like a per-record IV — and you can decrypt each record on its
+own with `body[0:16]` as the IV — but that's a decoding shortcut that
+**silently drops 4 bytes of real content per record**. Decrypt the
+continuous chain instead. Then each record starts with a **12-byte frame**:
+the constant magic `98 fe 87 39` followed by streaming-writer state — a
+scatter command (`32`/`33`), the 16-bit **write pointer** (`+120`/record,
+= RAM `$07b`) and the **carry** counter (`+8`/record, = RAM `$07e`; 120+8 =
+128 = one page per 16 records). The **13th byte onward is the actual
+firmware content** — and those first 4 content bytes are exactly what
+per-record decryption discards (it's why a naive de-frame comes out ~4
+bytes/record short and never lands byte-exact). The bootloader decrypts the
+continuous chain and relies on the `98 fe 87 39` magic being where it
+expects on every record.
 
-**This is why edited firmwares fail to flash.** If you change a payload
-byte and re-encrypt only its record (reusing the stored 16 bytes as an IV),
-that record's ciphertext changes — and in the continuous chain it is the CBC
-input for the *next* record's frame, so the next frame's magic decrypts to
-garbage and **the bootloader rejects the flash**: it stops acking chunks
-(`a1 22`) and returns `a0 11` exactly one record after your edit, never
-sending the `a1 44` finish. **Fix: re-encrypt the full continuous chain**
-(decrypt continuous → edit payload only → re-encrypt continuous → re-chunk
-to the original body lengths → recompute the per-record CRC-16/CMS). Then
-every frame stays intact and the bootloader commits. *(Confirmed on-device
-2026-07-07: a per-record-edited 1.20 with one changed byte is rejected at
-the next record; the identical edit re-encrypted as the continuous chain
-flashes clean and commits — `a1 44`. It then hits the separate boot wall
-below.)*
+**A per-record re-encrypt of an edit is what makes a flash get refused.**
+If you change a content byte and re-encrypt only that record (reusing its
+stored 16 bytes as an IV), that record's ciphertext changes — and in the
+continuous chain it is the CBC input for the *next* record's frame, so the
+next frame's magic decrypts to garbage and **the bootloader rejects the
+flash**: it stops acking chunks (`a1 22`) and returns `a0 11` exactly one
+record after your edit, never sending the `a1 44` finish. A correctly
+edited firmware flashes fine — you just have to **re-encrypt the whole
+continuous chain** (decrypt continuous → edit content only → re-encrypt
+continuous → re-chunk to the original body lengths → recompute the
+per-record CRC-16/CMS). *(Confirmed on-device 2026-07-07: a per-record-edited
+1.20 with one changed byte is rejected at the next record; the identical edit
+re-encrypted as the continuous chain flashes clean and commits — `a1 44`. It
+then hits the separate boot wall below.)*
 
 ## How I got the key
 
@@ -171,13 +176,15 @@ With the AES key + IV + protocol map you can:
 - Mint OTA streams that the bootloader accepts and commits — **but only if
   you re-encrypt through the continuous chain** (see "What's inside"); a
   per-record re-encrypt of an edit is rejected at the next record.
-- Read the OTA stream's full plaintext. (The 16-byte per-record blocks are
-  **not** inert IVs, and the earlier note that they "carry no integrity
-  information" was wrong: decrypted in the continuous chain they are frames
-  with magic `98 fe 87 39` + streaming-writer control bytes, and they carry
-  the chain's integrity — a payload edit that isn't re-encrypted through the
-  continuous chain corrupts the next frame and the bootloader refuses the
-  flash.)
+- Read the OTA stream's full plaintext — but decode it as the **continuous
+  chain**, not per-record. Per-record decoding treats each record's first 16
+  bytes as an inert IV; in the continuous chain those bytes are a **12-byte
+  frame** (`98 fe 87 39` magic + write-pointer + carry) followed by **4 bytes
+  of real content**, so per-record decoding silently loses 4 content bytes
+  per record. (The earlier note that these blocks "carry no integrity
+  information" was also wrong: the `98 fe 87 39` magic is the chain's
+  integrity check — a content edit not re-encrypted through the continuous
+  chain corrupts the next frame and the bootloader refuses the flash.)
 
 What you can't easily do (yet) is **boot a modified firmware**. A
 boot-time integrity check validates the flashed image before the app
@@ -301,10 +308,13 @@ def transport_stream(enc_path):
     """Decrypt each record under its own IV (= the first 16 bytes of the body) and
     concatenate the payloads -> the clean scatter stream.
 
-    NB: decrypting the whole .enc as one CBC chain under INITIAL_IV yields the same
-    *payload* bytes, but it also decrypts the 16-byte IV regions and leaves them in
-    as noise -- which spawns ~24 spurious `32 00 00` descriptor hits and corrupts the
-    de-frame. So de-frame the per-record payloads, not the whole-chain output.
+    NB: this per-record shortcut is LOSSY. The real structure is one continuous CBC
+    chain under INITIAL_IV; decrypting it that way recovers, before each record's
+    payload, a 12-byte frame (magic `98 fe 87 39` + write-pointer + carry) AND 4
+    content bytes that this per-record decode drops (the `32 00 00` "descriptor hits"
+    that look like noise are those real frames). For clean payload-only scatter
+    de-framing the per-record output is convenient; for a byte-exact reconstruction
+    decode the continuous chain and keep the 12-byte-frame + full content per record.
     """
     raw = binascii.unhexlify(''.join(enc_path.read_text().split()))
     out = bytearray()
