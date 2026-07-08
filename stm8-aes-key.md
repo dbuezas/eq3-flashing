@@ -8,6 +8,8 @@ See [**SOLVED: booting a forged firmware**](#solved-2026-07-08-booting-a-forged-
 below; the old "Challenge" section is left in place as the record of what the
 wall looked like before it fell.
 
+![Flash map of the STM8L052C6: OTA-delivered app (green, $9100–$FA56, byte-exact and address-contiguous), the resident UBC and per-build gap the OTA never carries (red, ROP-locked — the CRC algorithm runs here), and the 2-byte integrity stamp at $FFFE. The boot check is a self-verifying CRC-16/0x8005 over $9100–$FFFF including the stamp; it forges differentially (init/xorout/resident all cancel), proven on-device by changing the reported version byte 0x78→0x99 and booting.](flash_structure.svg)
+
 ## SOLVED (2026-07-08): booting a forged firmware
 
 **The boot wall is a self-verifying CRC-16, and it uses the same `0x8005`
@@ -265,8 +267,6 @@ So the runtime image lives at **`$9200..$ff80`**. `$8000..$9200` is the
 **UBC** (User Boot Code; write-protected, UBC option byte `0x22`) and is
 **not carried in the OTA** — that's where the reset vector and the boot
 validator live.
-
-![Flash memory map: OTA-delivered regions (green) vs. resident regions the OTA never carries (red), the 136-byte scatter frame, the per-build watermark, and the 2-byte integrity stamp at $FFFE. The validator's algorithm lives in the red regions.](flash_structure.svg)
 
 De-framed like this, the code reads as clean STM8 — e.g. the flash-unlock
 `35 56 50 52 35 ae 50 52` and the watchdog-key routine `mov $50e0,#$cc`.

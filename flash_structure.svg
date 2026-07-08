@@ -1,108 +1,126 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="620" font-family="ui-sans-serif,Segoe UI,Helvetica,Arial,sans-serif">
-  <style>
-    .t{font-size:20px;font-weight:700;fill:#111}
-    .s{font-size:13px;fill:#444}
-    .addr{font-size:13px;font-weight:600;fill:#111;font-family:ui-monospace,Menlo,Consolas,monospace}
-    .lbl{font-size:14px;font-weight:600;fill:#111}
-    .d{font-size:12px;fill:#333}
-    .note{font-size:12px;fill:#444}
-    .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
-  </style>
-  <rect x="0" y="0" width="900" height="620" fill="#ffffff"/>
-  <text x="30" y="34" class="t">EQ-3 CC-RT-BLE · STM8L052C6 — 32 KB flash: OTA-delivered vs resident</text>
-  <text x="30" y="54" class="s">The OTA is a scatter-load. Descriptors place 124-byte payloads at dst ($9200→$ff80). The boot validator + its algorithm live in flash the OTA never delivers.</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 660" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+  <defs>
+    <pattern id="hatch" width="7" height="7" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+      <rect width="7" height="7" fill="#ffe3e3"/>
+      <line x1="0" y1="0" x2="0" y2="7" stroke="#ffa8a8" stroke-width="2"/>
+    </pattern>
+    <marker id="arw" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#1971c2"/>
+    </marker>
+  </defs>
 
-  <!-- memory bar: high address at top -->
-  <!-- UBC gap band top ($ff80..$ffff last page) -->
-  <g>
-    <!-- $FF80-$FFFF delivered last page (STAMP) -->
-    <rect x="220" y="80" width="360" height="46" fill="#dff0d8" stroke="#4a7"/>
-    <text x="400" y="101" text-anchor="middle" class="lbl">$FF80–$FFFF · delivered (last page)</text>
-    <text x="400" y="118" text-anchor="middle" class="d">holds the 2-byte integrity STAMP (reference) near $FFFE</text>
-    <text x="210" y="98" text-anchor="end" class="addr">$FFFF</text>
+  <rect x="0" y="0" width="920" height="660" fill="#ffffff"/>
 
-    <!-- $FA00-$FF7F resident gap -->
-    <rect x="220" y="130" width="360" height="70" fill="#f6d9d6" stroke="#c55"/>
-    <text x="400" y="160" text-anchor="middle" class="lbl">$FA00–$FF7F · RESIDENT (not in OTA)</text>
-    <text x="400" y="178" text-anchor="middle" class="d">12-page seek-gap ($f980 → $ff80, +$600). Likely resident boot/validator code.</text>
-    <text x="210" y="148" text-anchor="end" class="addr">$FF80</text>
+  <!-- header -->
+  <text x="28" y="34" font-size="21" font-weight="700" fill="#212529">EQ-3 CC-RT-BLE · STM8L052C6 — 32 KB flash &amp; the boot-integrity CRC <tspan fill="#2f9e44">(cracked)</tspan></text>
+  <text x="28" y="54" font-size="13" fill="#495057">The boot check is a <tspan font-weight="700">self-verifying CRC-16/0x8005</tspan> over the delivered image, up to &amp; including its own 2-byte</text>
+  <text x="28" y="71" font-size="13" fill="#495057">stamp at $FFFE. It forges <tspan font-weight="700">differentially</tspan> — the ROP-locked validator algorithm is never needed.</text>
 
-    <!-- $9200-$F9FF app + boot-low, delivered -->
-    <rect x="220" y="204" width="360" height="270" fill="#dff0d8" stroke="#4a7"/>
-    <text x="400" y="230" text-anchor="middle" class="lbl">$9200–$F9FF · OTA-delivered (scatter)</text>
-    <text x="400" y="249" text-anchor="middle" class="d">App + low-boot code. ~99% reconstructed, self-consistent.</text>
-    <text x="400" y="266" text-anchor="middle" class="d">185 descriptors · 124-byte payload at dst+4 · 4-byte page head</text>
-    <line x1="240" y1="300" x2="560" y2="300" stroke="#4a7" stroke-dasharray="3 3"/>
-    <text x="400" y="318" text-anchor="middle" class="note">readable routines here, e.g.:</text>
-    <text x="400" y="336" text-anchor="middle" class="d mono">$eb90/$f69c flash-unlock (PUKR/DUKR)</text>
-    <text x="400" y="352" text-anchor="middle" class="d mono">$e530 IAPSR poll · $f967 IWDG key</text>
-    <text x="400" y="368" text-anchor="middle" class="d mono">USART1/OTA-receive codec ($5230/$5231)</text>
-    <line x1="240" y1="392" x2="560" y2="392" stroke="#4a7" stroke-dasharray="3 3"/>
-    <text x="400" y="410" text-anchor="middle" class="note">$f680 group-gap: +384 (covers $f700/$f780</text>
-    <text x="400" y="426" text-anchor="middle" class="note">via extended payload — still delivered)</text>
-    <text x="210" y="222" text-anchor="end" class="addr">$FA00</text>
+  <!-- ===== memory map (byte-exact de-frame; bands not to scale) ===== -->
+  <text x="72" y="86" font-size="12" font-weight="700" fill="#868e96">FLASH MAP  ·  high address at top  ·  v1.20 example</text>
 
-    <!-- $8000-$91FF UBC resident -->
-    <rect x="220" y="478" width="360" height="86" fill="#f6d9d6" stroke="#c55"/>
-    <text x="400" y="506" text-anchor="middle" class="lbl">$8000–$91FF · UBC / boot code (not in OTA)</text>
-    <text x="400" y="525" text-anchor="middle" class="d">Factory, write-protected (UBC=0x22). Reset vector at $8000.</text>
-    <text x="400" y="542" text-anchor="middle" class="d">Runs first; **validates the app → the checksum ALGORITHM is here**.</text>
-    <text x="210" y="496" text-anchor="end" class="addr">$9200</text>
-    <text x="210" y="560" text-anchor="end" class="addr">$8000</text>
-  </g>
+  <!-- Band1: STAMP -->
+  <rect x="72" y="96" width="276" height="32" rx="5" fill="#ffec99" stroke="#f08c00" stroke-width="1.5"/>
+  <text x="84" y="110" font-size="12.5" font-weight="700" fill="#8a5a00">$FFFE–$FFFF · STAMP  ★</text>
+  <text x="84" y="123" font-size="11" fill="#8a5a00">2-byte CRC fix-up (v1.20 = 6E 2E). Delivered.</text>
 
-  <!-- per-build watermark ticks embedded in the framing (~26x, every ~0x900) -->
-  <g fill="#e0a000">
-    <rect x="222" y="214" width="10" height="4"/>
-    <rect x="222" y="244" width="10" height="4"/>
-    <rect x="222" y="278" width="10" height="4"/>
-    <rect x="222" y="312" width="10" height="4"/>
-    <rect x="222" y="346" width="10" height="4"/>
-    <rect x="222" y="388" width="10" height="4"/>
-    <rect x="222" y="424" width="10" height="4"/>
-    <rect x="222" y="462" width="10" height="4"/>
-    <rect x="222" y="112" width="10" height="4"/>
-    <text x="238" y="470" font-size="10" fill="#a06000" transform="rotate(-90 238 470)">◄ per-build watermark ×26</text>
-  </g>
+  <!-- Band2: top page -->
+  <rect x="72" y="131" width="276" height="30" rx="5" fill="#d3f9d8" stroke="#2f9e44" stroke-width="1.5"/>
+  <text x="84" y="145" font-size="12.5" font-weight="700" fill="#2b8a3e">$FFD0–$FFFD · top page (delivered)</text>
+  <text x="84" y="157" font-size="11" fill="#2b8a3e">0xFF padding — hashed too (no coverage hole).</text>
 
-  <!-- right-side call-outs -->
-  <g>
-    <rect x="610" y="80" width="270" height="46" fill="#fffbe6" stroke="#e0b400"/>
-    <text x="622" y="100" class="lbl">★ STAMP = integrity reference</text>
-    <text x="622" y="117" class="note">2 bytes, per-version, edit → UPD (confirmed)</text>
+  <!-- Band3: gap -->
+  <rect x="72" y="164" width="276" height="60" rx="5" fill="url(#hatch)" stroke="#e03131" stroke-width="1.5"/>
+  <text x="84" y="182" font-size="12.5" font-weight="700" fill="#c92a2a">$FA57–$FFCF · gap — NOT in OTA</text>
+  <text x="84" y="196" font-size="11" fill="#c92a2a">Resident / erased 0xFF. Extent varies per build</text>
+  <text x="84" y="208" font-size="11" fill="#c92a2a">(1.10/1.20 end $FA56; 1.46/1.48 reach $FD26).</text>
+  <text x="84" y="220" font-size="11" fill="#c92a2a">Inside the CRC span, but cancels when forging.</text>
 
-    <rect x="610" y="130" width="270" height="70" fill="#fff" stroke="#c55"/>
-    <text x="622" y="150" class="d">The seek means these bytes are never</text>
-    <text x="622" y="166" class="d">written by OTA → resident. If the validator</text>
-    <text x="622" y="182" class="d">loop lives here, it can't be read from OTA.</text>
+  <!-- Band4: app -->
+  <rect x="72" y="227" width="276" height="150" rx="5" fill="#d3f9d8" stroke="#2f9e44" stroke-width="1.5"/>
+  <text x="84" y="245" font-size="12.5" font-weight="700" fill="#2b8a3e">$9100–$FA56 · delivered app (byte-exact)</text>
+  <text x="84" y="259" font-size="11" fill="#2b8a3e">Address-contiguous. No page-head tags — the</text>
+  <text x="84" y="271" font-size="11" fill="#2b8a3e">12-byte frames are consumed on de-frame.</text>
+  <line x1="84" y1="281" x2="336" y2="281" stroke="#a9e0b5" stroke-width="1"/>
+  <text x="84" y="296" font-size="11" fill="#2b8a3e">$9100  native IVT (82 00 HH LL, ~10 real ISRs)</text>
+  <text x="84" y="311" font-size="11" fill="#2b8a3e">$CE29  reported firmware-version byte (0x78)</text>
+  <text x="84" y="326" font-size="11" fill="#2b8a3e">$F6E0  flash-unlock PUKR/DUKR (35 56 50 52)</text>
+  <text x="84" y="341" font-size="11" fill="#2b8a3e">$FBE6  command indexer · $982D  cmd-0xA0</text>
+  <text x="84" y="356" font-size="11" fill="#2b8a3e">$92C5  command dispatch</text>
+  <text x="84" y="371" font-size="11" fill="#69b57a" font-style="italic">readable, links cleanly in Ghidra (base $8000)</text>
 
-    <rect x="610" y="204" width="270" height="158" fill="#fff" stroke="#4a7"/>
-    <text x="622" y="224" class="lbl">Scatter frame (136 B):</text>
-    <text x="622" y="243" class="d mono">32 00 00 HI LO B1 B2   (7B header)</text>
-    <text x="622" y="260" class="d mono">&lt;124-byte payload&gt;</text>
-    <text x="622" y="277" class="d mono">33 00 00 HI LO         (5B trailer)</text>
-    <text x="622" y="298" class="note">B2 = page-index countdown (not a checksum)</text>
-    <text x="622" y="314" class="note">payload placed at dst+4; head = HI LO 00 B2</text>
-    <text x="622" y="336" class="lbl" fill="#a06000">Per-build WATERMARK:</text>
-    <text x="622" y="352" class="note">same fingerprint value ×26 in the framing,</text>
-    <text x="622" y="368" class="note" transform="translate(0,-2)">every ~0x900 — stripped on de-frame, never run</text>
+  <!-- Band5: UBC -->
+  <rect x="72" y="380" width="276" height="72" rx="5" fill="#ffe3e3" stroke="#e03131" stroke-width="1.5"/>
+  <text x="84" y="398" font-size="12.5" font-weight="700" fill="#c92a2a">$8000–$90FF · UBC / boot code — NOT in OTA</text>
+  <text x="84" y="412" font-size="11" fill="#c92a2a">Factory, write-protected (UBC=0x22), ROP-locked</text>
+  <text x="84" y="424" font-size="11" fill="#c92a2a">(SWIM flash reads → 0x71). Reset vector $8000.</text>
+  <text x="84" y="440" font-size="11" fill="#c92a2a" font-weight="700">The CRC algorithm runs here — never needed to forge.</text>
 
-    <rect x="610" y="478" width="270" height="86" fill="#fff" stroke="#999"/>
-    <text x="622" y="498" class="lbl">Transport-tail (NOT flashed):</text>
-    <text x="622" y="517" class="d mono">"KEQ" image descriptor + 0x9CB0 tag</text>
-    <text x="622" y="534" class="d mono">34 30 &lt;per-build fingerprint&gt;</text>
-    <text x="622" y="551" class="note">edit → boots (cosmetic, not validated)</text>
+  <!-- checked-region bracket -->
+  <path d="M356,96 h9 V377 h-9" fill="none" stroke="#1971c2" stroke-width="2.5"/>
+  <text x="374" y="236" font-size="12" font-weight="700" fill="#1971c2" transform="rotate(90 374 236)" text-anchor="middle">CRC span: $9100–$FFFF (incl. stamp)</text>
+
+  <!-- ===== right column ===== -->
+  <!-- Box A: the check -->
+  <rect x="470" y="96" width="422" height="126" rx="8" fill="#e7f5ff" stroke="#1971c2" stroke-width="1.5"/>
+  <text x="486" y="118" font-size="14" font-weight="700" fill="#1864ab">The check — self-verifying CRC-16</text>
+  <text x="486" y="139" font-size="12" fill="#1864ab">poly 0x8005, non-reflected — <tspan font-weight="700">same</tspan> poly as the OTA chunk CRC.</text>
+  <text x="486" y="157" font-size="12" fill="#1864ab">Runs over $9100…$FFFF, <tspan font-weight="700">including</tspan> its own 2-byte stamp,</text>
+  <text x="486" y="175" font-size="12" fill="#1864ab">so CRC(region) = a fixed constant. Boot recomputes it</text>
+  <text x="486" y="193" font-size="12" fill="#1864ab">and compares → any mismatch shows <tspan font-family="monospace" font-weight="700">UPD</tspan> (won't boot).</text>
+  <text x="486" y="213" font-size="11.5" fill="#495057" font-style="italic">Edit the stamp, or any content byte → UPD. Confirmed on-device.</text>
+
+  <!-- Box B: the forge -->
+  <rect x="470" y="234" width="422" height="150" rx="8" fill="#ebfbee" stroke="#2f9e44" stroke-width="1.5"/>
+  <text x="486" y="256" font-size="14" font-weight="700" fill="#2b8a3e">The forge — no resident code required</text>
+  <text x="486" y="277" font-size="12" fill="#2b8a3e">CRC is linear, so for equal-length images A, B:</text>
+  <text x="500" y="296" font-size="12.5" font-family="monospace" font-weight="700" fill="#1971c2">CRC(A) ⊕ CRC(B) = CRC0(A ⊕ B)</text>
+  <text x="486" y="315" font-size="12" fill="#2b8a3e">init, final-XOR, the UBC, the gap — all identical between</text>
+  <text x="486" y="333" font-size="12" fill="#2b8a3e">stock &amp; edit, so they <tspan font-weight="700">cancel</tspan>. Only your changed bytes remain.</text>
+  <text x="486" y="353" font-size="12" fill="#2b8a3e">→ pick the 2 stamp bytes so CRC(edit)=CRC(stock). 65536 tries.</text>
+  <text x="486" y="373" font-size="11.5" fill="#495057" font-style="italic">Poly &amp; region drop out of same-layout diffs (1.10^1.20, 1.46^1.48).</text>
+
+  <!-- Box C: proof -->
+  <rect x="470" y="396" width="422" height="86" rx="8" fill="#fff9db" stroke="#f08c00" stroke-width="1.5"/>
+  <text x="486" y="418" font-size="14" font-weight="700" fill="#8a5a00">Proven on-device  🏆</text>
+  <text x="486" y="439" font-size="12" fill="#8a5a00">Forged v1.20 with the version byte $CE29 = 0x78 → 0x99,</text>
+  <text x="486" y="457" font-size="12" fill="#8a5a00">recomputed the stamp, flashed. Device <tspan font-weight="700">booted</tspan> and reports</text>
+  <text x="486" y="475" font-size="12" fill="#8a5a00"><tspan font-family="monospace" font-weight="700">cmd 0x00 → 0199…</tspan> (stock <tspan font-family="monospace">0178…</tspan>) — an impossible stock version.</text>
+
+  <!-- pipeline arrow strip -->
+  <text x="72" y="505" font-size="12" font-weight="700" fill="#868e96">FORGE PIPELINE</text>
+  <g font-size="11.5" fill="#212529">
+    <rect x="72"  y="516" width="150" height="34" rx="6" fill="#f1f3f5" stroke="#ced4da"/>
+    <text x="147" y="531" text-anchor="middle">de-frame byte-exact</text>
+    <text x="147" y="544" text-anchor="middle" fill="#868e96" font-size="10.5">continuous chain</text>
+    <line x1="224" y1="533" x2="244" y2="533" stroke="#1971c2" stroke-width="2" marker-end="url(#arw)"/>
+    <rect x="246" y="516" width="132" height="34" rx="6" fill="#f1f3f5" stroke="#ced4da"/>
+    <text x="312" y="531" text-anchor="middle">edit content</text>
+    <text x="312" y="544" text-anchor="middle" fill="#868e96" font-size="10.5">any delivered byte</text>
+    <line x1="380" y1="533" x2="400" y2="533" stroke="#1971c2" stroke-width="2" marker-end="url(#arw)"/>
+    <rect x="402" y="516" width="150" height="34" rx="6" fill="#e7f5ff" stroke="#1971c2"/>
+    <text x="477" y="531" text-anchor="middle" font-weight="700">fix $FFFE stamp</text>
+    <text x="477" y="544" text-anchor="middle" fill="#1864ab" font-size="10.5">CRC(edit)=CRC(stock)</text>
+    <line x1="554" y1="533" x2="574" y2="533" stroke="#1971c2" stroke-width="2" marker-end="url(#arw)"/>
+    <rect x="576" y="516" width="170" height="34" rx="6" fill="#f1f3f5" stroke="#ced4da"/>
+    <text x="661" y="531" text-anchor="middle">re-encrypt chain + CRC</text>
+    <text x="661" y="544" text-anchor="middle" fill="#868e96" font-size="10.5">re-chunk, CRC-16/CMS</text>
+    <line x1="748" y1="533" x2="768" y2="533" stroke="#2f9e44" stroke-width="2" marker-end="url(#arw)"/>
+    <rect x="770" y="516" width="120" height="34" rx="6" fill="#ebfbee" stroke="#2f9e44"/>
+    <text x="830" y="531" text-anchor="middle" font-weight="700" fill="#2b8a3e">flash → boots</text>
+    <text x="830" y="544" text-anchor="middle" fill="#2b8a3e" font-size="10.5">no UPD</text>
   </g>
 
   <!-- legend -->
-  <g>
-    <rect x="30" y="588" width="16" height="14" fill="#dff0d8" stroke="#4a7"/>
-    <text x="52" y="600" class="d">delivered by OTA (readable)</text>
-    <rect x="250" y="588" width="16" height="14" fill="#f6d9d6" stroke="#c55"/>
-    <text x="272" y="600" class="d">resident / not in OTA (unreadable)</text>
-    <rect x="520" y="588" width="16" height="14" fill="#fffbe6" stroke="#e0b400"/>
-    <text x="542" y="600" class="d">integrity reference (the stamp)</text>
-    <rect x="722" y="590" width="10" height="10" fill="#e0a000"/>
-    <text x="738" y="600" class="d">per-build watermark (framing)</text>
+  <g font-size="11.5" fill="#495057">
+    <rect x="72"  y="596" width="16" height="12" rx="2" fill="#d3f9d8" stroke="#2f9e44"/>
+    <text x="94"  y="606">delivered by OTA (readable)</text>
+    <rect x="270" y="596" width="16" height="12" rx="2" fill="url(#hatch)" stroke="#e03131"/>
+    <text x="292" y="606">resident / not in OTA (ROP-locked)</text>
+    <rect x="516" y="596" width="16" height="12" rx="2" fill="#ffec99" stroke="#f08c00"/>
+    <text x="538" y="606">integrity stamp (the CRC fix-up)</text>
+    <line x1="742" y1="602" x2="762" y2="602" stroke="#1971c2" stroke-width="2.5"/>
+    <text x="768" y="606">CRC-covered span</text>
   </g>
+  <text x="28" y="640" font-size="10.5" fill="#adb5bd">Addresses from the byte-exact continuous-chain de-frame (companion repo eq3-ota). Supersedes the earlier scatter/page-head model.</text>
 </svg>
