@@ -1,9 +1,115 @@
 # Reverse engineering the EQ-3 CC-RT-BLE OTA
 
 I extracted the following from the EQ-3 CC-RT-BLE radiator thermostat
-firmware update process. The bootloader gates further attacks (boot-time
-validator in ROP-protected flash), but the OTA pipeline itself is now
-fully understood and the AES-256 key + IV are recoverable.
+firmware update process. The OTA pipeline is fully understood, the AES-256
+key + IV are recoverable, **and — as of 2026-07-08 — the boot-time integrity
+wall is defeated: a modified firmware now boots and runs on the device.**
+See [**SOLVED: booting a forged firmware**](#solved-2026-07-08-booting-a-forged-firmware)
+below; the old "Challenge" section is left in place as the record of what the
+wall looked like before it fell.
+
+## SOLVED (2026-07-08): booting a forged firmware
+
+**The boot wall is a self-verifying CRC-16, and it uses the same `0x8005`
+polynomial as the OTA chunk CRC** (non-reflected). It runs over the byte-exact
+runtime image, address-contiguous, from the start of the delivered app up to
+**and including** the 2-byte stamp at `$fffe:$ffff`. "Self-verifying" means the
+stamp bytes are picked so the CRC of the whole region — its own stamp included —
+equals a fixed constant; at boot the validator recomputes it and refuses (`UPD`)
+on any mismatch.
+
+**You do not need the resident code, the init value, or the final XOR to forge.**
+That is the whole trick, and it's why the ROP lock never mattered:
+
+CRC is linear, so for two equal-length images `A` and `B`,
+`CRC(A) XOR CRC(B) = CRC0(A XOR B)` where `CRC0` is the `init=0, xorout=0` core.
+Every unknown — the real init, the final XOR, the ROP-locked UBC below the app,
+the unwritten upper pages — is **identical between the stock firmware and your
+edit**, so it cancels. Only the bytes you actually changed survive the XOR.
+
+So, to boot an edit:
+
+1. De-frame **byte-exactly** — decrypt the continuous chain and keep the 12-byte
+   frame *and* the 4 content bytes per record, placing content address-contiguous
+   (this repo's `transport_stream`/`deframe` payload-only shortcut is **not**
+   enough; use the byte-exact de-framer in the companion `eq3-ota` repo).
+2. Apply your content edit(s).
+3. Choose the two stamp bytes at `$fffe:$ffff` so
+   `CRC0_8005(edited[start..$ffff]) == CRC0_8005(stock[start..$ffff])`
+   (only 65536 possibilities — or solve the last two bytes directly).
+4. Re-encrypt the continuous chain, re-chunk to the original body lengths,
+   recompute the per-chunk CRC-16/CMS, flash.
+
+No resident dump, no glitching.
+
+**Why every prior CRC sweep came up empty** — two pitfalls, both about the
+*input*, not the algorithm:
+
+- **Wrong image.** Payload-only de-framing (and the page-head-writing scatter
+  model further down) don't produce the bytes the validator actually hashes.
+  The validator hashes the byte-exact, address-contiguous image — the one you
+  only get once you recover the 4 content bytes per record that per-record
+  decryption drops. CRC over the wrong bytes never matches, for any polynomial.
+- **Cross-length differential.** Sweeping `CRC(content) == stamp` *across
+  versions* fails because the versions are **different lengths**, and a
+  length-varying differential is not linear. The fix is to only difference
+  **same-length, same-layout** version pairs — here `1.10`↔`1.20` and
+  `1.46`↔`1.48`. For those, `stampA XOR stampB == CRC0_8005(imgA XOR imgB)`
+  holds exactly (`1.10^1.20 → 0x1c50`, `1.46^1.48 → 0x9383`), which pins the
+  polynomial to `0x8005` and the region to `[start .. $ffff]`. (Differencing
+  the *delivered-minus-gap* image matches neither pair — that's how the region's
+  exact extent is fixed to the full address-contiguous span.)
+
+**Proof, on-device.** I forged v1.20 with its reported **firmware-version byte**
+changed from `0x78` to `0x99`. (The version is the immediate operand of the
+cmd-`0x00` reply builder `a6 fd 6b 01 a6 01 6b 02 a6 <VER> 6b 03`; that operand
+equals the version integer in all six firmwares — `1.05→0x69 … 1.20→0x78 …
+1.48→0x94` — so it is genuinely the version, verified across builds.) I
+recomputed the stamp as above, flashed, and the device **booted and reported
+version `0x99`**: `cmd 0x00 -> 0199...`, where stock is `0178...`. `0x99` = 153
+is an impossible stock version, so the readout can only be the forgery. An inert
+padding byte at `$ffd0` + recomputed stamp booted identically. The `UPD` wall is
+gone.
+
+This also reconciles the old observations: the CRC covers 100% of delivered
+content — every code/data byte including the last page's `0xff` padding, right up
+to the stamp — which matches the "no coverage hole" result below; it is simply a
+plain linear CRC, and the "chain-following custom/keyed hash" reading was an
+artifact of hashing the wrong (page-head-bearing) image, not a real keyed function.
+
+Minimal forge helper (pair it with the byte-exact de-framer):
+
+```python
+def crc0_8005(data):                 # CRC-16/0x8005, non-reflected, init=0, xorout=0
+    c = 0
+    for x in data:
+        c ^= x << 8
+        for _ in range(8):
+            c = ((c << 1) ^ 0x8005) & 0xFFFF if c & 0x8000 else (c << 1) & 0xFFFF
+    return c
+
+def _step(c, x):                     # one CRC0 byte-step (to solve the final two bytes)
+    c ^= x << 8
+    for _ in range(8):
+        c = ((c << 1) ^ 0x8005) & 0xFFFF if c & 0x8000 else (c << 1) & 0xFFFF
+    return c
+
+def fix_stamp(edited, stock, start=0x9100):
+    """edited/stock: byte-exact $0000-indexed flash images (bytearray). The edit is
+    already applied to `edited` everywhere except its $fffe:$ffff stamp. Sets that
+    stamp so the device boots. `start` cancels out — any value <= the first edit works."""
+    target = crc0_8005(bytes(stock[start:0x10000]))   # the region constant a valid build hits
+    prefix = crc0_8005(bytes(edited[start:0xfffe]))    # CRC up to (not incl) the stamp
+    for a in range(256):
+        pa = _step(prefix, a)
+        for b in range(256):
+            if _step(pa, b) == target:
+                edited[0xfffe], edited[0xffff] = a, b
+                return edited
+    raise RuntimeError('unreachable for a 16-bit CRC')
+```
+
+Everything below predates the crack and is kept for context.
 
 ## What's inside
 
@@ -186,17 +292,20 @@ With the AES key + IV + protocol map you can:
   integrity check — a content edit not re-encrypted through the continuous
   chain corrupts the next frame and the bootloader refuses the flash.)
 
-What you can't easily do (yet) is **boot a modified firmware**. A
-boot-time integrity check validates the flashed image before the app
-runs and shows `UPD` (refusing to boot) on any modification. The check's
-*reference* is a **2-byte per-version value at the very top of flash
-(`$FFFE`)**, carried in the OTA — flip a byte of it and the device shows
-`UPD`, confirming it's checked. But the *algorithm* that reads it lives in
-the resident code the OTA never delivers (the UBC `$8000..$9200`, and/or
-the `$fa80..$ff00` seek-gap), so you can't read it or recompute a valid
-value without a hardware dump of that region.
+Booting a modified firmware **used to** be the open problem — it no longer is;
+see [SOLVED](#solved-2026-07-08-booting-a-forged-firmware) above. The boot-time
+check is a self-verifying CRC-16/`0x8005` over the byte-exact image up to and
+including its 2-byte stamp at `$FFFE`, and it forges without ever reading the
+resident algorithm (CRC linearity cancels every unknown). The paragraph that
+used to sit here — "you can't recompute a valid value without a hardware dump"
+— was wrong: you can, differentially, from the six shipped builds alone.
 
-## Challenge
+## Challenge (SOLVED — see [above](#solved-2026-07-08-booting-a-forged-firmware))
+
+*This section framed the wall before it fell. The answer turned out to be a
+self-verifying CRC-16/`0x8005`; the "not any standard checksum" conclusion below
+was an artifact of hashing the wrong (payload-only / page-head-bearing) image and
+of differencing across unequal-length builds. Kept verbatim as the record.*
 
 If you can figure out how to **boot a forged firmware** on this thing,
 I'd love to hear about it. Concretely: produce an `.enc` whose
